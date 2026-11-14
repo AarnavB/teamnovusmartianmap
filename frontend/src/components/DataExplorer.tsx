@@ -17,10 +17,13 @@ function textField(record: Record<string, unknown>, keys: string[]): string {
 
 function siteBounds(site: MissionSite): string {
   const padding = 0.04;
+  // Mars landing-site references use 0–360 east longitude; WMTS cache bounds
+  // are validated in the signed -180–180 range by the backend.
+  const signedLongitude = ((site.longitudeEast + 180) % 360 + 360) % 360 - 180;
   return [
-    site.longitudeEast - padding,
+    signedLongitude - padding,
     site.latitude - padding,
-    site.longitudeEast + padding,
+    signedLongitude + padding,
     site.latitude + padding,
   ].map((value) => value.toFixed(4)).join(',');
 }
