@@ -426,7 +426,7 @@ export default function App() {
 
           {activeTab === 'science' && <ScienceAssistant />}
 
-          {activeTab === 'data' && <DataExplorer sources={datasets} planId={plan?.plan_id} onTerrainImported={(nextTerrain) => { setTerrain(nextTerrain); setPlan(null); setRoutes([]); setBenchmarkResults([]); setError(''); setConditionNotice(''); setLayer('elevation'); const nextStart = { x: 4, y: 5 }; const nextGoal = { x: nextTerrain.width - 5, y: nextTerrain.height - 8 }; setStart(nextStart); setGoal(nextGoal); }} />}
+          {activeTab === 'data' && <DataExplorer missionSite={selectedMissionSite} sources={datasets} planId={plan?.plan_id} onTerrainImported={(nextTerrain) => { setTerrain(nextTerrain); setPlan(null); setRoutes([]); setBenchmarkResults([]); setError(''); setConditionNotice(''); setLayer('elevation'); const nextStart = { x: 4, y: 5 }; const nextGoal = { x: nextTerrain.width - 5, y: nextTerrain.height - 8 }; setStart(nextStart); setGoal(nextGoal); }} />}
         </aside>
       </main>
       <footer className="app-footer"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'SYNTHETIC DEMONSTRATION TILE' : 'IMPORTED DEM + UNKNOWN AUXILIARY LAYERS'}</span><span>NOT FOR OPERATIONAL USE</span></footer>
