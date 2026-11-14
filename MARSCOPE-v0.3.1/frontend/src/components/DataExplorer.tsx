@@ -15,7 +15,7 @@ function textField(record: Record<string, unknown>, keys: string[]): string {
 }
 
 export default function DataExplorer({ sources, planId, onTerrainImported }: { sources: OfficialSource[]; planId?: string; onTerrainImported: (terrain: TerrainData) => void }) {
-  const [keywords, setKeywords] = useState('Curiosity boxwork Mount Sharp');
+  const [keywords, setKeywords] = useState('Perseverance Jezero Crater delta');
   const [instrument, setInstrument] = useState('HiRISE');
   const [pdsResult, setPdsResult] = useState<ArchiveResult | null>(null);
   const [odeResult, setOdeResult] = useState<ArchiveResult | null>(null);
@@ -30,8 +30,8 @@ export default function DataExplorer({ sources, planId, onTerrainImported }: { s
   const [layerMin, setLayerMin] = useState(-150);
   const [layerMax, setLayerMax] = useState(50);
   const [layerUnit, setLayerUnit] = useState('degC');
-  const [wmtsLayer, setWmtsLayer] = useState('curiosity_hirise_mosaic');
-  const [tileBbox, setTileBbox] = useState('137.42,-4.86,137.50,-4.78');
+  const [wmtsLayer, setWmtsLayer] = useState('Mars_MOLA_blend200ppx_HRSC_ClrShade_clon0dd_200mpp_lzw');
+  const [tileBbox, setTileBbox] = useState('77.00,17.50,78.60,19.40');
   const [tileSummary, setTileSummary] = useState('');
   const [officialUrl, setOfficialUrl] = useState('');
   const [downloadSummary, setDownloadSummary] = useState('');
@@ -65,7 +65,7 @@ export default function DataExplorer({ sources, planId, onTerrainImported }: { s
 
   const runOdeSearch = async () => {
     setLoading('ode'); setError(''); setNotice('');
-    try { setOdeResult(await api.odeSearch(instrument, { minLat: -6.5733, maxLat: -2.8078, westLon: 135.1843, eastLon: 139.2413, limit: 40 })); }
+    try { setOdeResult(await api.odeSearch(instrument, { minLat: 17.58, maxLat: 19.29, westLon: 76.99, eastLon: 78.58, limit: 40 })); }
     catch (err) { setError(err instanceof Error ? err.message : 'ODE search failed'); }
     finally { setLoading(null); }
   };
