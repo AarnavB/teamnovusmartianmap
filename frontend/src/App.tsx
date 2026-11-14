@@ -425,7 +425,7 @@ export default function App() {
             <p className="metric-foot">{selected.metrics.model_note}</p>
           </div>}
 
-          {activeTab === 'science' && <ScienceAssistant />}
+          {activeTab === 'science' && <ScienceAssistant missionSite={selectedMissionSite} />}
 
           {activeTab === 'data' && <DataExplorer missionSite={selectedMissionSite} sources={datasets} planId={plan?.plan_id} onTerrainImported={(nextTerrain) => { setTerrain(nextTerrain); setPlan(null); setRoutes([]); setBenchmarkResults([]); setError(''); setConditionNotice(''); setLayer('elevation'); const nextStart = { x: 4, y: 5 }; const nextGoal = { x: nextTerrain.width - 5, y: nextTerrain.height - 8 }; setStart(nextStart); setGoal(nextGoal); }} />}
         </aside>
