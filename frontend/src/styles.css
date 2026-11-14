@@ -48,6 +48,23 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .location-copy strong { font-size: 12px; font-weight: 700; }
 .location-copy span { color: #839092; font-size: 9px; }
 .location-chevron { color: #708084; font-size: 16px; }
+.mission-site-card { align-items: flex-start; }
+.mission-site-card .planet-glyph { flex: 0 0 32px; margin-top: 13px; }
+.mission-site-copy { min-width: 0; }
+.mission-site-label { color: #819091; font-family: 'DM Mono', monospace; font-size: 8px; letter-spacing: .10em; }
+.mission-site-select { width: 100%; min-width: 0; padding: 7px 24px 7px 8px; color: #e5e2d7; background: #141c1e; border: 1px solid #3b494b; border-radius: 4px; font: 600 10px 'DM Sans', sans-serif; }
+.mission-site-select:focus { outline: 1px solid #78aeb1; border-color: #78aeb1; }
+.mission-site-select option { color: #e5e2d7; background: #141c1e; }
+.mission-site-meta { margin-top: 8px; padding: 10px; background: #151d1f; border: 1px solid #2b3739; border-radius: 5px; }
+.mission-site-coordinate { display: flex; flex-direction: column; gap: 4px; }
+.mission-site-coordinate span { color: #849395; font: 8px 'DM Mono', monospace; letter-spacing: .09em; }
+.mission-site-coordinate strong { color: #d8c6a7; font: 10px 'DM Mono', monospace; }
+.mission-site-focus { display: flex; flex-direction: column; gap: 4px; margin-top: 9px; }
+.mission-site-focus b { color: #d8a36c; font-size: 10px; }
+.mission-site-focus span { color: #aab4b0; font-size: 9px; line-height: 1.45; }
+.mission-site-meta a { display: inline-block; margin-top: 8px; color: #83b8bc; font: 8px 'DM Mono', monospace; text-decoration: none; }
+.mission-site-meta a:hover { text-decoration: underline; }
+.mission-site-warning { margin: 8px 1px 0; color: #9b8e79; font: 8px/1.5 'DM Mono', monospace; }
 .section-kicker { margin: 25px 0 13px; color: #be8d62; }
 .field-stack { display: flex; flex-direction: column; gap: 8px; }
 .field-label { display: flex; justify-content: space-between; align-items: center; color: #8a9898; font-family: 'DM Mono', monospace; font-size: 8px; letter-spacing: .10em; margin-top: 3px; }
