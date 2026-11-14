@@ -1,4 +1,4 @@
-import type { ArchiveResult, BenchmarkResult, MissionConstraintsPayload, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, RegistryResponse, ScienceAnswer, TerrainData } from './types';
+import type { JezeroPoisResponse, ArchiveResult, BenchmarkResult, MissionConstraintsPayload, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, RegistryResponse, ScienceAnswer, TerrainData } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
@@ -18,6 +18,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  jezeroPois: () => request<JezeroPoisResponse>('/api/jezero/pois'),
   health: () => request<{ status: string; release: string }>('/api/health'),
   terrain: () => request<TerrainData>('/api/terrain'),
   registry: () => request<RegistryResponse>('/api/registry'),
