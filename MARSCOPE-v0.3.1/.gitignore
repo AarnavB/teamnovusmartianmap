@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+.pytest_cache/
+node_modules/
+dist/
+.env
+.env.local
+.run-logs/
+*.pyc
+# User-imported / downloaded mission data and generated exports
+backend/app/data/downloads/
+backend/app/data/ingested/
+backend/app/data/observations/
+backend/app/data/offline_packages/
+backend/app/data/wmts_cache/
+backend/app/data/pds_labels/

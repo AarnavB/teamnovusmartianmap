@@ -1,0 +1,4 @@
+# Install after backend/requirements.txt. Rasterio wheels are platform-specific.
+rasterio>=1.4,<2.0
+pyproj>=3.7,<4.0
+Pillow>=11,<13
