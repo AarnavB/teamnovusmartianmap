@@ -120,7 +120,7 @@ export default function DataExplorer({ sources, planId, onTerrainImported, missi
     if (!file) return;
     setLoading('dem'); setError(''); setNotice('');
     try {
-      const result = await api.importDem(file, demVerticalUnits);
+      const result = await api.importDem(file, demVerticalUnits, missionSite.id);
       onTerrainImported(result.terrain);
       setNotice(`DEM imported. Active route grid: ${result.terrain.width} × ${result.terrain.height}. ${result.notice}`);
     } catch (err) { setError(err instanceof Error ? err.message : 'DEM import failed'); }
@@ -131,7 +131,7 @@ export default function DataExplorer({ sources, planId, onTerrainImported, missi
     if (!file) return;
     setLoading('layer'); setError(''); setNotice('');
     try {
-      const result = await api.importLayer(file, layerKind, layerMin, layerMax, layerUnit);
+      const result = await api.importLayer(file, layerKind, layerMin, layerMax, layerUnit, missionSite.id);
       onTerrainImported(result.terrain);
       setNotice(`Layer ${layerKind} aligned to the active Mars DEM. ${result.notice}`);
     } catch (err) { setError(err instanceof Error ? err.message : 'Raster layer import failed'); }
