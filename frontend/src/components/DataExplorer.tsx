@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import type { JezeroPoisResponse, OfficialSource, TerrainData } from '../types';
+import type { MissionSite } from '../missionSites';
 
 type ArchiveResult = { archive: string; endpoint: string; query: Record<string, unknown>; record_count: number; records: Record<string, unknown>[]; raw: unknown; documentation: string; note: string };
 type ObservationImport = { instrument: string; source_file: string; sha256: string; imported_utc: string; row_count: number; summary: Record<string, unknown>; provenance_note: string };
@@ -14,8 +15,21 @@ function textField(record: Record<string, unknown>, keys: string[]): string {
   return 'Metadata field not present in this record';
 }
 
-export default function DataExplorer({ sources, planId, onTerrainImported }: { sources: OfficialSource[]; planId?: string; onTerrainImported: (terrain: TerrainData) => void }) {
-  const [keywords, setKeywords] = useState('Curiosity boxwork Mount Sharp');
+function siteBounds(site: MissionSite): string {
+  const padding = 0.04;
+  // Mars landing-site references use 0–360 east longitude; WMTS cache bounds
+  // are validated in the signed -180–180 range by the backend.
+  const signedLongitude = ((site.longitudeEast + 180) % 360 + 360) % 360 - 180;
+  return [
+    signedLongitude - padding,
+    site.latitude - padding,
+    signedLongitude + padding,
+    site.latitude + padding,
+  ].map((value) => value.toFixed(4)).join(',');
+}
+
+export default function DataExplorer({ sources, planId, onTerrainImported, missionSite }: { sources: OfficialSource[]; planId?: string; onTerrainImported: (terrain: TerrainData) => void; missionSite: MissionSite }) {
+  const [keywords, setKeywords] = useState(() => `${missionSite.mission} ${missionSite.region} Mars`);
   const [instrument, setInstrument] = useState('HiRISE');
   const [pdsResult, setPdsResult] = useState<ArchiveResult | null>(null);
   const [odeResult, setOdeResult] = useState<ArchiveResult | null>(null);
@@ -30,8 +44,8 @@ export default function DataExplorer({ sources, planId, onTerrainImported }: { s
   const [layerMin, setLayerMin] = useState(-150);
   const [layerMax, setLayerMax] = useState(50);
   const [layerUnit, setLayerUnit] = useState('degC');
-  const [wmtsLayer, setWmtsLayer] = useState('curiosity_hirise_mosaic');
-  const [tileBbox, setTileBbox] = useState('137.42,-4.86,137.50,-4.78');
+  const [wmtsLayer, setWmtsLayer] = useState(missionSite.id === 'gale' ? 'curiosity_hirise_mosaic' : 'Mars_MOLA_blend200ppx_HRSC_ClrShade_clon0dd_200mpp_lzw');
+  const [tileBbox, setTileBbox] = useState(() => siteBounds(missionSite));
   const [tileSummary, setTileSummary] = useState('');
   const [officialUrl, setOfficialUrl] = useState('');
   const [downloadSummary, setDownloadSummary] = useState('');
@@ -42,12 +56,25 @@ export default function DataExplorer({ sources, planId, onTerrainImported }: { s
   const [jezeroError, setJezeroError] = useState('');
 
   useEffect(() => {
+    setKeywords(`${missionSite.mission} ${missionSite.region} Mars`);
+    setTileBbox(siteBounds(missionSite));
+    setWmtsLayer(missionSite.id === 'gale' ? 'curiosity_hirise_mosaic' : 'Mars_MOLA_blend200ppx_HRSC_ClrShade_clon0dd_200mpp_lzw');
+    setPdsResult(null);
+    setOdeResult(null);
+  }, [missionSite.id, missionSite.mission, missionSite.region, missionSite.latitude, missionSite.longitudeEast]);
+
+  useEffect(() => {
+    if (missionSite.id !== 'jezero') {
+      setJezero(null);
+      setJezeroError('');
+      return;
+    }
     let alive = true;
     api.jezeroPois()
       .then((result) => { if (alive) setJezero(result); })
       .catch((err: Error) => { if (alive) setJezeroError(err.message); });
     return () => { alive = false; };
-  }, []);
+  }, [missionSite.id]);
 
   const refreshObservations = async () => {
     try { const result = await api.observations(); setObservations(result.imports); }
@@ -75,7 +102,16 @@ export default function DataExplorer({ sources, planId, onTerrainImported }: { s
 
   const runOdeSearch = async () => {
     setLoading('ode'); setError(''); setNotice('');
-    try { setOdeResult(await api.odeSearch(instrument, { minLat: -6.5733, maxLat: -2.8078, westLon: 135.1843, eastLon: 139.2413, limit: 40 })); }
+    try {
+      const searchPaddingDegrees = 1.5;
+      setOdeResult(await api.odeSearch(instrument, {
+        minLat: Math.max(-90, missionSite.latitude - searchPaddingDegrees),
+        maxLat: Math.min(90, missionSite.latitude + searchPaddingDegrees),
+        westLon: missionSite.longitudeEast - searchPaddingDegrees,
+        eastLon: missionSite.longitudeEast + searchPaddingDegrees,
+        limit: 40,
+      }));
+    }
     catch (err) { setError(err instanceof Error ? err.message : 'ODE search failed'); }
     finally { setLoading(null); }
   };
@@ -174,7 +210,7 @@ export default function DataExplorer({ sources, planId, onTerrainImported }: { s
 
     <section className="archive-search-card">
       <div className="archive-section-head"><b>03 / MARS ORBITAL DATA EXPLORER</b><span className="connected-tag">ODE REST</span></div>
-      <p>Searches product footprints intersecting the Gale Crater region. ODE uses east-positive longitudes in the query; verify each product's map-projection label.</p>
+      <p>Searches product footprints around the selected mission-site reference coordinate. ODE uses east-positive longitudes in the query; verify each product's map-projection label and actual footprint.</p>
       <div className="archive-search-line"><select value={instrument} onChange={(e) => setInstrument(e.target.value)} aria-label="Instrument"><option>HiRISE</option><option>CTX</option><option>CRISM</option></select><button onClick={() => void runOdeSearch()} disabled={loading !== null}>{loading === 'ode' ? 'SEARCHING' : 'SEARCH ODE'}</button></div>
       {odeResult && <ArchiveResultView result={odeResult}/>}
       <a href="https://oderest.rsl.wustl.edu/ODE_REST_V2.1.6.pdf" target="_blank" rel="noreferrer">ODE REST MANUAL ↗</a>
@@ -192,7 +228,7 @@ export default function DataExplorer({ sources, planId, onTerrainImported }: { s
 
     <section className="archive-search-card">
       <div className="archive-section-head"><b>05 / NASA/JPL MARS TREK WMTS</b><span className="connected-tag">MAP SERVICE</span></div>
-      <p>Cache a small area from the official Curiosity HiRISE roving-site mosaic or a MOLA/HRSC global context layer. Tile matrices, styles and formats are read from WMTS GetCapabilities.</p>
+      <p>Cache a small area around the selected landing-site reference. The Curiosity HiRISE mosaic is Gale-focused; use a global MOLA/HRSC layer for broad cross-site context. Tile matrices, styles and formats are read from WMTS GetCapabilities.</p>
       <div className="archive-search-line"><select value={wmtsLayer} onChange={(e) => setWmtsLayer(e.target.value)} aria-label="Mars Trek layer"><option value="curiosity_hirise_mosaic">Curiosity HiRISE mosaic</option><option value="Mars_MOLA_blend200ppx_HRSC_ClrShade_clon0dd_200mpp_lzw">MOLA / HRSC color hillshade</option><option value="Mars_MGS_MOLA_ClrShade_merge_global_463m">MOLA global hillshade</option></select></div>
       <label className="compact-field-label">BOUNDS · WEST, SOUTH, EAST, NORTH (EAST-POSITIVE DEGREES)</label>
       <input className="mapping-input" value={tileBbox} onChange={(e) => setTileBbox(e.target.value)} aria-label="WMTS bounding box"/>
@@ -246,7 +282,7 @@ export default function DataExplorer({ sources, planId, onTerrainImported }: { s
     {(error || notice) && <div className={error ? 'error-banner' : 'success-note'}>{error || notice}</div>}
 
 
-    <section className="archive-search-card">
+    {missionSite.id === 'jezero' && <section className="archive-search-card">
       <div className="archive-section-head"><b>JEZERO CRATER / REFERENCE LOCATIONS</b><span className="connected-tag">BACKEND API</span></div>
       <p>Reference locations are loaded from the FastAPI Jezero endpoint. Coordinates use planetocentric latitude and east-positive longitude.</p>
       {jezero ? <>
@@ -264,7 +300,7 @@ export default function DataExplorer({ sources, planId, onTerrainImported }: { s
         </div>
         <small>{jezero.notice}</small>
       </> : <div className={jezeroError ? 'error-banner' : 'archive-empty'}>{jezeroError ? `Could not load Jezero locations: ${jezeroError}` : 'Loading Jezero reference locations…'}</div>}
-    </section>
+    </section>}
 
     <div className="data-source-list"><div className="target-list-head"><span className="eyebrow">OFFICIAL SOURCE CATALOG</span><span className="demo-tag">{sources.length} SOURCES</span></div>
       {sources.map((source) => <div className="dataset-row" key={source.id}><div className="dataset-top"><b>{source.name}</b><span className={source.integration === 'connected' ? 'connected-tag' : 'doc-status'}>{source.integration.replace(/_/g, ' ').toUpperCase()}</span></div><small>{source.organization} · {source.kind}</small><div className="dataset-detail">{source.description}</div><div className="dataset-detail muted-copy">Coverage: {source.coverage}</div><div className="dataset-detail muted-copy">Limit: {source.limitations}</div><a href={source.url} target="_blank" rel="noreferrer">OFFICIAL SOURCE ↗</a></div>)}

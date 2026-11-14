@@ -3,6 +3,7 @@ import TerrainScene from './components/TerrainScene';
 import DataExplorer from './components/DataExplorer';
 import ScienceAssistant from './components/ScienceAssistant';
 import { api } from './api';
+import { DEFAULT_MISSION_SITE_ID, MISSION_SITES } from './missionSites';
 import type { BenchmarkResult, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, Route, TerrainData } from './types';
 
 type Layer = 'elevation' | 'slope' | 'roughness' | 'regolith' | 'temperature' | 'environment' | 'radiation' | 'uncertainty' | 'science';
@@ -23,6 +24,8 @@ const layerNames: { id: Layer; name: string; unit: string }[] = [
 ];
 
 function pointText(p: Point) { return `X ${String(p.x).padStart(2, '0')} / Y ${String(p.y).padStart(2, '0')}`; }
+function formatLatitude(value: number) { return `${Math.abs(value).toFixed(5)}° ${value < 0 ? 'S' : 'N'}`; }
+function formatLongitude(value: number) { return `${value.toFixed(5)}° E`; }
 function pathDistanceM(path: Point[], cellSizeM: number) {
   let total = 0;
   for (let index = 1; index < path.length; index += 1) {
@@ -39,6 +42,7 @@ function gridHeading(from: Point, to: Point) {
 }
 export default function App() {
   const [terrain, setTerrain] = useState<TerrainData | null>(null);
+  const [selectedMissionSiteId, setSelectedMissionSiteId] = useState(DEFAULT_MISSION_SITE_ID);
   const [datasets, setDatasets] = useState<OfficialSource[]>([]);
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -71,6 +75,7 @@ export default function App() {
   const [status, setStatus] = useState('CONNECTING');
   const [evaProgressIndex, setEvaProgressIndex] = useState(0);
   const [offlineStatus, setOfflineStatus] = useState<OfflineStatus | null>(null);
+  const selectedMissionSite = MISSION_SITES.find((site) => site.id === selectedMissionSiteId) ?? MISSION_SITES[0];
 
   useEffect(() => {
     let alive = true;
@@ -269,18 +274,39 @@ export default function App() {
           <div className="brand-mark">M</div>
           <div><div className="brand-name">MARSCOPE</div><div className="brand-tag">FROM ORBIT TO BOOTPRINT</div></div>
         </div>
-        <div className="mission-crumb"><span className="crumb-dot" /> GALE CRATER <span>/</span> MOUNT SHARP <span>/</span> BOXWORK STUDY</div>
+        <div className="mission-crumb"><span className="crumb-dot" /> {selectedMissionSite.region.toUpperCase()} <span>/</span> {selectedMissionSite.mission.toUpperCase()} <span>/</span> {selectedMissionSite.focusLabel.toUpperCase()}</div>
         <div className="top-status"><span className={`status-dot ${status === 'OK' ? 'online' : 'offline'}`} /> API {status} <span className="top-divider" /> <span className="mono">BUILD 0.3.1</span></div>
       </header>
 
       <main className="workspace">
         <section className="left-rail">
           <div className="rail-head"><span className="eyebrow">MISSION AREA</span><span className="live-chip">{terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'SIMULATION' : 'IMPORTED DEM'}</span></div>
-          <div className="location-card">
+          <div className="location-card mission-site-card">
             <div className="planet-glyph">♂</div>
-            <div className="location-copy"><strong>Mount Sharp</strong><span>Gale Crater · Mars</span></div>
-            <div className="location-chevron">⌄</div>
+            <div className="location-copy mission-site-copy">
+              <label className="mission-site-label" htmlFor="mission-site-select">SELECT MISSION SITE</label>
+              <select
+                id="mission-site-select"
+                className="mission-site-select"
+                value={selectedMissionSiteId}
+                onChange={(event) => setSelectedMissionSiteId(event.target.value)}
+                aria-label="Select a historic Mars mission site"
+              >
+                {MISSION_SITES.map((site) => <option key={site.id} value={site.id}>{site.region} — {site.mission}</option>)}
+              </select>
+              <span>{selectedMissionSite.vehicle} · {selectedMissionSite.agency}</span>
+            </div>
           </div>
+          <div className="mission-site-meta">
+            <div className="mission-site-coordinate">
+              <span>LANDING-SITE REFERENCE</span>
+              <strong>{formatLatitude(selectedMissionSite.latitude)} · {formatLongitude(selectedMissionSite.longitudeEast)}</strong>
+              <small>{selectedMissionSite.coordinateNote} · planetocentric latitude, east-positive longitude</small>
+            </div>
+            <div className="mission-site-focus"><b>{selectedMissionSite.focusLabel}</b><span>{selectedMissionSite.focus}</span></div>
+            <a href={selectedMissionSite.coordinateSourceUrl} target="_blank" rel="noreferrer">{selectedMissionSite.coordinateSource} ↗</a>
+          </div>
+          <p className="mission-site-warning">Reference coordinates only. The planner below still uses a synthetic, non-georeferenced grid until a matching DEM is verified and imported.</p>
           <div className="section-kicker">MISSION PLANNING</div>
           <div className="field-stack">
             <div className="field-label"><span>01 / START POINT</span><button className={`tiny-action ${pickMode === 'start' ? 'active' : ''}`} onClick={() => setPickMode(pickMode === 'start' ? null : 'start')}>PICK ON MAP</button></div>
@@ -314,7 +340,7 @@ export default function App() {
 
         <section className="center-column">
           <div className="view-header">
-            <div><div className="eyebrow">SURFACE RECONNAISSANCE</div><h1>Gale Crater <span>/</span> Mount Sharp</h1></div>
+            <div><div className="eyebrow">SURFACE RECONNAISSANCE</div><h1>{selectedMissionSite.region} <span>/</span> {selectedMissionSite.feature}</h1></div>
             <div className="view-actions"><div className="segmented"><button className={viewMode === '3D' ? 'selected' : ''} onClick={() => setViewMode('3D')}>3D TERRAIN</button><button className={viewMode === '2D' ? 'selected' : ''} onClick={() => setViewMode('2D')}>2D MAP</button></div><button className={`eva-toggle ${evaMode ? 'on' : ''}`} onClick={() => setEvaMode(!evaMode)}><span className="eva-dot" /> EVA MODE</button></div>
           </div>
 
@@ -399,9 +425,9 @@ export default function App() {
             <p className="metric-foot">{selected.metrics.model_note}</p>
           </div>}
 
-          {activeTab === 'science' && <ScienceAssistant />}
+          {activeTab === 'science' && <ScienceAssistant missionSite={selectedMissionSite} />}
 
-          {activeTab === 'data' && <DataExplorer sources={datasets} planId={plan?.plan_id} onTerrainImported={(nextTerrain) => { setTerrain(nextTerrain); setPlan(null); setRoutes([]); setBenchmarkResults([]); setError(''); setConditionNotice(''); setLayer('elevation'); const nextStart = { x: 4, y: 5 }; const nextGoal = { x: nextTerrain.width - 5, y: nextTerrain.height - 8 }; setStart(nextStart); setGoal(nextGoal); }} />}
+          {activeTab === 'data' && <DataExplorer missionSite={selectedMissionSite} sources={datasets} planId={plan?.plan_id} onTerrainImported={(nextTerrain) => { setTerrain(nextTerrain); setPlan(null); setRoutes([]); setBenchmarkResults([]); setError(''); setConditionNotice(''); setLayer('elevation'); const nextStart = { x: 4, y: 5 }; const nextGoal = { x: nextTerrain.width - 5, y: nextTerrain.height - 8 }; setStart(nextStart); setGoal(nextGoal); }} />}
         </aside>
       </main>
       <footer className="app-footer"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'SYNTHETIC DEMONSTRATION TILE' : 'IMPORTED DEM + UNKNOWN AUXILIARY LAYERS'}</span><span>NOT FOR OPERATIONAL USE</span></footer>

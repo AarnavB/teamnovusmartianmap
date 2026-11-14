@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
+import type { MissionSite } from '../missionSites';
 
 type Evidence = { id: string; title: string; date: string; published?: string; instrument?: string; sol?: number | null; summary: string; url: string; credit?: string; limitations?: string; retrieval_score?: number };
 type Answer = { answer: string; evidence: Evidence[]; mode: string; caution: string; model?: string; generation_note?: string };
@@ -10,7 +11,7 @@ const PROMPTS = [
   'Which Curiosity observations should be inspected for boxwork morphology?'
 ];
 
-export default function ScienceAssistant() {
+export default function ScienceAssistant({ missionSite }: { missionSite: MissionSite }) {
   const [question, setQuestion] = useState(PROMPTS[0]);
   const [result, setResult] = useState<Answer | null>(null);
   const [busy, setBusy] = useState(false);
@@ -23,6 +24,7 @@ export default function ScienceAssistant() {
   };
   return <div className="science-content science-assistant">
     <div className="panel-title"><span className="eyebrow">EVIDENCE-GROUNDED SCIENCE ASSISTANT</span><h3>Ask the archive</h3><p>Answers are assembled from a curated NASA/JPL evidence set. Each statement links to its original source.</p></div>
+    {missionSite.id !== 'gale' && <div className="science-caution">The bundled evidence set currently focuses on Curiosity / Gale Crater boxwork. It is not yet a site-specific science catalogue for {missionSite.region}. Use the Data tab for live PDS and ODE searches around this selected site.</div>}
     <textarea className="science-question" value={question} onChange={(e) => setQuestion(e.target.value)} rows={4} aria-label="Question for the Mars science assistant"/>
     <button className="package-button" onClick={() => void ask()} disabled={busy || !question.trim()}>{busy ? 'RETRIEVING EVIDENCE…' : 'ASK MARSCOPE'}</button>
     <div className="prompt-list"><span className="eyebrow">SUGGESTED QUESTIONS</span>{PROMPTS.map((prompt) => <button key={prompt} onClick={() => { setQuestion(prompt); void ask(prompt); }}>{prompt}</button>)}</div>

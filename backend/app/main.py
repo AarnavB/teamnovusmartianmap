@@ -130,14 +130,14 @@ def routes(payload: PlanRequest) -> dict[str, Any]:
 
     return {
         "plan_id": plan_id,
-        "terrain_id": "gale-demo-synthetic-01",
+        "terrain_id": TERRAIN.terrain_id,
         "start": {"x": start[0], "y": start[1]},
         "goal": {"x": goal[0], "y": goal[1]},
         "constraints": constraints.__dict__,
         "routes": route_set,
         "incremental_balanced_path": [{"x": x, "y": y} for x, y in incremental_path],
         "incremental_algorithm": "Lifelong Planning A* (LPA*) with retained g/rhs state",
-        "scientific_note": "All route results are calculated on the deterministic synthetic tile, not on a NASA terrain raster.",
+        "scientific_note": "Routes use the currently active terrain grid. Check its provenance and georeferencing status; selected mission-site coordinates are reference points and are not automatically mapped to planner cells.",
     }
 
 @app.post("/api/replan")
@@ -207,7 +207,7 @@ def reset() -> dict[str, str]:
     global TERRAIN
     TERRAIN = generate_terrain()
     PLAN_SESSIONS.clear()
-    return {"status": "reset", "terrain_id": "gale-demo-synthetic-01"}
+    return {"status": "reset", "terrain_id": TERRAIN.terrain_id}
 
 
 # ---------------------------------------------------------------------------

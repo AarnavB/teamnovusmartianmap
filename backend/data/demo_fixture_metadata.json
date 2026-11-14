@@ -1,6 +1,6 @@
 {
-  "id": "gale-demo-synthetic-01",
-  "name": "Synthetic Mount Sharp teaching tile",
+  "id": "mars-demo-synthetic-01",
+  "name": "Synthetic Martian teaching tile",
   "status": "SIMULATED_NOT_GEOREFERENCED",
   "seed": 20261114,
   "grid": {
@@ -14,5 +14,5 @@
   "source_observation_ids": [],
   "source_urls": [],
   "generated_by": "backend/app/terrain.py",
-  "description": "Deterministic synthetic surface with procedural ridges, hollows, roughness, regolith, temperature, environmental/radiation indices, uncertainty and three simulated science targets. It is not a geographic subset of Gale Crater and does not contain measured Mars observations."
+  "description": "Deterministic synthetic surface with procedural ridges, hollows, roughness, regolith, temperature, environmental/radiation indices, uncertainty and three simulated science targets. It is not a geographic subset of any selected Mars mission site and does not contain measured Mars observations."
 }
