@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+.pytest_cache/
+node_modules/
+dist/
+.env
+.env.local
+.run-logs/
+*.pyc
+# User-imported / downloaded mission data and generated exports
+backend/app/data/downloads/
+backend/app/data/ingested/
+backend/app/data/observations/
+backend/app/data/offline_packages/
+backend/app/data/wmts_cache/
+backend/app/data/pds_labels/
+
+# Local Jev decision audit (contains mission questions and evidence IDs, never API keys)
+decision-service/data/decision-audit.json
+
+# Jev route-ranking audit (contains route metrics and outcomes, no credentials)
+decision-service/data/route-decision-audit.json
+# Jev adaptive pathfinding audit (mission prompt and normalized weights; no API keys)
+decision-service/data/pathfinding-weight-audit.json
