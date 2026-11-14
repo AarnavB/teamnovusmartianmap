@@ -1,0 +1,34 @@
+[
+  {
+    "name": "Jezero Crater Centre",
+    "latitude": 18.4100,
+    "longitude": 77.6900,
+    "type": "geological_reference",
+    "approximate": false,
+    "description": "Reference point for Jezero Crater."
+  },
+  {
+    "name": "Perseverance Landing Site",
+    "latitude": 18.44463,
+    "longitude": 77.45088,
+    "type": "mission_site",
+    "approximate": false,
+    "description": "Published landing-site coordinate; this is not the rover's current location."
+  },
+  {
+    "name": "Neretva Vallis",
+    "latitude": 18.4006,
+    "longitude": 77.1860,
+    "type": "ancient_channel",
+    "approximate": true,
+    "description": "Representative image-context coordinate, not a surveyed channel centroid."
+  },
+  {
+    "name": "Western Delta Area",
+    "latitude": 18.3512,
+    "longitude": 77.2757,
+    "type": "delta_deposit",
+    "approximate": true,
+    "description": "Representative scene coordinate, not an exact delta centroid."
+  }
+]
