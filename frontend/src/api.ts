@@ -1,6 +1,6 @@
 import type { ArchiveResult, BenchmarkResult, MissionConstraintsPayload, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, RegistryResponse, ScienceAnswer, TerrainData } from './types';
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? '';
+const API_BASE = (import.meta.env.VITE_API_BASE || 'https://marswalk-api-1o9c.onrender.com').replace(/\/$/, '');
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
