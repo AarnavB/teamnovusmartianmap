@@ -3,12 +3,20 @@ import type { JezeroPoisResponse, ArchiveResult, BenchmarkResult, MissionConstra
 const API_BASE = (import.meta.env.VITE_API_BASE || 'https://marswalk-api-1o9c.onrender.com').replace(/\/$/, '');
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: init?.body instanceof FormData
-      ? { ...(init?.headers ?? {}) }
-      : { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: init?.body instanceof FormData
+        ? { ...(init?.headers ?? {}) }
+        : { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'browser network request failed';
+    throw new Error(
+      `Could not reach the API at ${API_BASE}${path}. Check that the Render service is running and that its CORS settings allow this Vercel domain. Browser detail: ${detail}`
+    );
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = typeof payload.detail === 'string' ? payload.detail : `API request failed (${response.status})`;
@@ -20,7 +28,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   jezeroPois: () => request<JezeroPoisResponse>('/api/jezero/pois'),
   health: () => request<{ status: string; release: string }>('/api/health'),
-  terrain: () => request<TerrainData>('/api/terrain'),
+  terrain: (siteId = 'jezero') => request<TerrainData>(`/api/terrain/${encodeURIComponent(siteId)}`),
   registry: () => request<RegistryResponse>('/api/registry'),
   dataCatalog: () => request<{ sources: OfficialSource[]; archives_connected: string[]; note: string }>('/api/data/catalog'),
   pdsSearch: (keywords: string, limit = 20) => request<ArchiveResult>(`/api/data/pds/search?keywords=${encodeURIComponent(keywords)}&limit=${limit}`),
@@ -41,12 +49,12 @@ export const api = {
     const form = new FormData(); form.append('file', file); form.append('instrument', instrument); form.append('mapping_json', JSON.stringify(mapping));
     return request<{ import: Record<string, unknown>; stored_record: string }>('/api/observations/import', { method: 'POST', body: form });
   },
-  importDem: async (file: File, verticalUnits: string) => {
-    const form = new FormData(); form.append('file', file); form.append('width', '96'); form.append('height', '96'); form.append('vertical_units', verticalUnits);
+  importDem: async (file: File, verticalUnits: string, siteId: string) => {
+    const form = new FormData(); form.append('file', file); form.append('width', '96'); form.append('height', '96'); form.append('vertical_units', verticalUnits); form.append('site_id', siteId);
     return request<{ terrain: TerrainData; provenance: Record<string, unknown>; notice: string }>('/api/terrain/import-dem', { method: 'POST', body: form });
   },
-  importLayer: async (file: File, layer: string, min: number, max: number, unit: string, band = 1) => {
-    const form = new FormData(); form.append('file', file); form.append('layer', layer); form.append('value_min', String(min)); form.append('value_max', String(max)); form.append('source_unit', unit); form.append('band', String(band));
+  importLayer: async (file: File, layer: string, min: number, max: number, unit: string, siteId: string, band = 1) => {
+    const form = new FormData(); form.append('file', file); form.append('layer', layer); form.append('value_min', String(min)); form.append('value_max', String(max)); form.append('source_unit', unit); form.append('band', String(band)); form.append('site_id', siteId);
     return request<{ terrain: TerrainData; provenance: Record<string, unknown>; notice: string }>('/api/terrain/import-layer', { method: 'POST', body: form });
   },
   offlinePackage: async (planId?: string) => {
@@ -55,10 +63,10 @@ export const api = {
     return response.blob();
   },
   offlineStatus: () => request<OfflineStatus>('/api/offline/status'),
-  plan: (start: Point, goal: Point, constraints: MissionConstraintsPayload) =>
-    request<PlanResponse>('/api/routes', { method: 'POST', body: JSON.stringify({ start, goal, constraints }) }),
-  benchmark: (start: Point, goal: Point, constraints: MissionConstraintsPayload) =>
-    request<{ benchmark_scope: string; results: BenchmarkResult[]; warning: string }>('/api/benchmark', { method: 'POST', body: JSON.stringify({ start, goal, constraints }) }),
+  plan: (siteId: string, start: Point, goal: Point, constraints: MissionConstraintsPayload) =>
+    request<PlanResponse>('/api/routes', { method: 'POST', body: JSON.stringify({ site_id: siteId, start, goal, constraints }) }),
+  benchmark: (siteId: string, start: Point, goal: Point, constraints: MissionConstraintsPayload) =>
+    request<{ site_id: string; terrain_id: string; benchmark_scope: string; results: BenchmarkResult[]; warning: string }>('/api/benchmark', { method: 'POST', body: JSON.stringify({ site_id: siteId, start, goal, constraints }) }),
   replan: (planId: string, obstacle: Point) =>
     request<ReplanResponse>('/api/replan', { method: 'POST', body: JSON.stringify({ plan_id: planId, obstacle }) }),
   updateCondition: (planId: string, cell: Point, kind: string, value: number) =>
