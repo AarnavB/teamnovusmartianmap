@@ -104,6 +104,9 @@ export default function App() {
     setTerrain(null);
     setPlan(null);
     setRoutes([]);
+    setPlanning(false);
+    setReplanning(false);
+    setBenchmarking(false);
     setBenchmarkResults([]);
     setAddedObstacles([]);
     setReplanResult(null);
@@ -124,6 +127,7 @@ export default function App() {
           throw new Error(`The API returned ${terrainData.site_name || terrainData.site_id || 'another site'} while ${siteId} was requested.`);
         }
         setTerrain(terrainData);
+        setStatus('OK');
       })
       .catch((err: Error) => {
         if (!alive) return;
