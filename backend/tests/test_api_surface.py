@@ -42,3 +42,52 @@ def test_invalid_plan_constraints_return_validation_error_not_server_error():
             "constraints": {"objective_weight_multipliers": {"not_an_objective": 1.0}},
         })
     assert response.status_code == 422
+
+
+
+def test_each_mission_site_has_a_distinct_labeled_terrain_grid():
+    with TestClient(app) as client:
+        jezero = client.get("/api/terrain/jezero")
+        gale = client.get("/api/terrain/gale")
+        legacy = client.get("/api/terrain")
+
+    assert jezero.status_code == 200
+    assert gale.status_code == 200
+    assert jezero.json()["site_id"] == "jezero"
+    assert gale.json()["site_id"] == "gale"
+    assert jezero.json()["site_name"] == "Jezero Crater"
+    assert gale.json()["site_name"] == "Gale Crater"
+    assert jezero.json()["id"] != gale.json()["id"]
+    assert jezero.json()["elevation_m"] != gale.json()["elevation_m"]
+    assert jezero.json()["status"] == "SIMULATED_NOT_GEOREFERENCED"
+    assert gale.json()["coordinate_info"]["georeferenced"] is False
+    assert legacy.json()["site_id"] == "jezero"
+
+
+def test_routes_use_requested_mission_site():
+    with TestClient(app) as client:
+        response = client.post("/api/routes", json={
+            "site_id": "gale",
+            "start": {"x": 4, "y": 5},
+            "goal": {"x": 59, "y": 56},
+            "constraints": {},
+        })
+
+    assert response.status_code == 200
+    assert response.json()["site_id"] == "gale"
+    assert response.json()["terrain_id"].startswith("mars-demo-gale-")
+
+
+def test_vercel_project_preview_origin_is_allowed_by_cors():
+    origin = "https://teamnovusmartianmap-git-feature-mission-site-selector-aarnav8.vercel.app"
+    with TestClient(app) as client:
+        response = client.options(
+            "/api/terrain/gale",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin

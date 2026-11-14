@@ -29,6 +29,8 @@ export type Target = {
 
 export type TerrainData = {
   id: string;
+  site_id: string;
+  site_name: string;
   name: string;
   status: string;
   warning: string;

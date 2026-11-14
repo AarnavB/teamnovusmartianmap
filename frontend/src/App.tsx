@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import TerrainScene from './components/TerrainScene';
 import DataExplorer from './components/DataExplorer';
 import ScienceAssistant from './components/ScienceAssistant';
@@ -43,6 +43,7 @@ function gridHeading(from: Point, to: Point) {
 export default function App() {
   const [terrain, setTerrain] = useState<TerrainData | null>(null);
   const [selectedMissionSiteId, setSelectedMissionSiteId] = useState(DEFAULT_MISSION_SITE_ID);
+  const activeMissionSiteIdRef = useRef(DEFAULT_MISSION_SITE_ID);
   const [datasets, setDatasets] = useState<OfficialSource[]>([]);
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -64,6 +65,7 @@ export default function App() {
   const [riskAversion, setRiskAversion] = useState(1.0);
   const [uncertaintyAversion, setUncertaintyAversion] = useState(1.0);
   const [loading, setLoading] = useState(true);
+  const [terrainLoading, setTerrainLoading] = useState(true);
   const [planning, setPlanning] = useState(false);
   const [replanning, setReplanning] = useState(false);
   const [error, setError] = useState('');
@@ -79,29 +81,73 @@ export default function App() {
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.terrain(), api.dataCatalog(), api.health()])
-      .then(([terrainData, catalog, health]) => {
+    Promise.all([api.dataCatalog(), api.health()])
+      .then(([catalog, health]) => {
         if (!alive) return;
-        setTerrain(terrainData);
         setDatasets(catalog.sources);
         setStatus(health.status.toUpperCase());
       })
       .catch((err: Error) => {
         if (!alive) return;
-        setError(`Backend unavailable: ${err.message}. Start the FastAPI server and refresh.`);
+        setError(`Backend connection problem: ${err.message}`);
         setStatus('OFFLINE');
       })
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    const siteId = selectedMissionSiteId;
+    activeMissionSiteIdRef.current = siteId;
+    setTerrainLoading(true);
+    setTerrain(null);
+    setPlan(null);
+    setRoutes([]);
+    setPlanning(false);
+    setReplanning(false);
+    setBenchmarking(false);
+    setBenchmarkResults([]);
+    setAddedObstacles([]);
+    setReplanResult(null);
+    setConditionNotice('');
+    setEvaProgressIndex(0);
+    setStart(INITIAL_START);
+    setGoal(INITIAL_GOAL);
+    setSelectedRoute('B');
+    setLayer('elevation');
+    setPickMode(null);
+    setEvaMode(false);
+    setError('');
+
+    api.terrain(siteId)
+      .then((terrainData) => {
+        if (!alive) return;
+        if (terrainData.site_id !== siteId) {
+          throw new Error(`The API returned ${terrainData.site_name || terrainData.site_id || 'another site'} while ${siteId} was requested.`);
+        }
+        setTerrain(terrainData);
+        setStatus('OK');
+      })
+      .catch((err: Error) => {
+        if (!alive) return;
+        setError(`Could not load terrain for ${siteId}: ${err.message}`);
+        setStatus('OFFLINE');
+      })
+      .finally(() => alive && setTerrainLoading(false));
+
+    return () => { alive = false; };
+  }, [selectedMissionSiteId]);
+
   const runPlan = useCallback(async (newStart = start, newGoal = goal) => {
+    const siteId = selectedMissionSiteId;
+    if (!terrain || terrain.site_id !== siteId || activeMissionSiteIdRef.current !== siteId) return;
     setPlanning(true);
     setError('');
     setReplanResult(null);
     setAddedObstacles([]);
     try {
-      const result = await api.plan(newStart, newGoal, {
+      const result = await api.plan(siteId, newStart, newGoal, {
         max_slope_deg: maxSlope,
         max_temperature_c: -35,
         eva_limit_minutes: evaMinutes,
@@ -122,20 +168,28 @@ export default function App() {
           uncertainty: uncertaintyAversion,
         },
       });
+      if (activeMissionSiteIdRef.current !== siteId) return;
       setPlan(result);
       setRoutes(result.routes);
       setSelectedRoute('B');
       setEvaProgressIndex(0);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Route planning failed');
+      if (activeMissionSiteIdRef.current === siteId) {
+        setError(err instanceof Error ? err.message : 'Route planning failed');
+      }
     } finally {
       setPlanning(false);
     }
-  }, [start, goal, maxSlope, evaMinutes, oxygenBudget, oxygenRate, restInterval, equipmentMass, sciencePriority, riskAversion, uncertaintyAversion]);
+  }, [selectedMissionSiteId, terrain, start, goal, maxSlope, evaMinutes, oxygenBudget, oxygenRate, restInterval, equipmentMass, sciencePriority, riskAversion, uncertaintyAversion]);
 
   useEffect(() => {
-    if (terrain && !plan && !planning && !error) void runPlan();
-  }, [terrain, plan, planning, error, runPlan]);
+    if (terrain && terrain.site_id === selectedMissionSiteId && !terrainLoading && !plan && !planning && !error) void runPlan();
+  }, [terrain, selectedMissionSiteId, terrainLoading, plan, planning, error, runPlan]);
+
+  const handleMissionSiteChange = (siteId: string) => {
+    activeMissionSiteIdRef.current = siteId;
+    setSelectedMissionSiteId(siteId);
+  };
 
   const handlePick = useCallback((point: Point) => {
     if (!terrain) return;
@@ -148,7 +202,7 @@ export default function App() {
     setBenchmarking(true);
     setError('');
     try {
-      const result = await api.benchmark(start, goal, {
+      const result = await api.benchmark(selectedMissionSiteId, start, goal, {
         max_slope_deg: maxSlope, max_temperature_c: -35, eva_limit_minutes: evaMinutes,
         energy_budget_wh: 180, return_reserve_fraction: 0.25, suit_mass_kg: 42, carried_equipment_mass_kg: equipmentMass, base_speed_mps: 0.65,
         oxygen_budget_l: oxygenBudget, oxygen_consumption_lpm: oxygenRate,
@@ -161,7 +215,7 @@ export default function App() {
           uncertainty: uncertaintyAversion,
         },
       });
-      setBenchmarkResults(result.results);
+      if (activeMissionSiteIdRef.current === selectedMissionSiteId) setBenchmarkResults(result.results);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Benchmark failed');
     } finally { setBenchmarking(false); }
@@ -280,7 +334,7 @@ export default function App() {
 
       <main className="workspace">
         <section className="left-rail">
-          <div className="rail-head"><span className="eyebrow">MISSION AREA</span><span className="live-chip">{terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'SIMULATION' : 'IMPORTED DEM'}</span></div>
+          <div className="rail-head"><span className="eyebrow">MISSION AREA</span><span className="live-chip">{terrainLoading ? 'LOADING' : terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'SIMULATION' : terrain ? 'IMPORTED DEM' : 'NO TERRAIN'}</span></div>
           <div className="location-card mission-site-card">
             <div className="planet-glyph">♂</div>
             <div className="location-copy mission-site-copy">
@@ -289,7 +343,7 @@ export default function App() {
                 id="mission-site-select"
                 className="mission-site-select"
                 value={selectedMissionSiteId}
-                onChange={(event) => setSelectedMissionSiteId(event.target.value)}
+                onChange={(event) => handleMissionSiteChange(event.target.value)}
                 aria-label="Select a historic Mars mission site"
               >
                 {MISSION_SITES.map((site) => <option key={site.id} value={site.id}>{site.region} — {site.mission}</option>)}
@@ -306,7 +360,7 @@ export default function App() {
             <div className="mission-site-focus"><b>{selectedMissionSite.focusLabel}</b><span>{selectedMissionSite.focus}</span></div>
             <a href={selectedMissionSite.coordinateSourceUrl} target="_blank" rel="noreferrer">{selectedMissionSite.coordinateSource} ↗</a>
           </div>
-          <p className="mission-site-warning">Reference coordinates only. The planner below still uses a synthetic, non-georeferenced grid until a matching DEM is verified and imported.</p>
+          <p className="mission-site-warning">{terrain?.site_id === selectedMissionSiteId ? terrain.warning : terrainLoading ? `Loading the ${selectedMissionSite.region} terrain grid…` : error || 'Terrain data is unavailable for this mission site.'}</p>
           <div className="section-kicker">MISSION PLANNING</div>
           <div className="field-stack">
             <div className="field-label"><span>01 / START POINT</span><button className={`tiny-action ${pickMode === 'start' ? 'active' : ''}`} onClick={() => setPickMode(pickMode === 'start' ? null : 'start')}>PICK ON MAP</button></div>
@@ -330,7 +384,7 @@ export default function App() {
             <div className="slider-row"><div><label>Data uncertainty aversion</label><b>{uncertaintyAversion.toFixed(1)}×</b></div><input type="range" min="0" max="3" step="0.1" value={uncertaintyAversion} onChange={(e) => setUncertaintyAversion(Number(e.target.value))} /></div>
             <div className="constraint-note"><span className="lock-icon">⌑</span> Multipliers reweight profile preferences and normalize weights to sum to 1. Hard constraints and return reserve are not relaxed. All mobility/resource values remain unvalidated research assumptions.</div>
           </div>
-          <button className="primary-button" onClick={() => void runPlan()} disabled={planning || !terrain}>
+          <button className="primary-button" onClick={() => void runPlan()} disabled={planning || terrainLoading || !terrain || terrain.site_id !== selectedMissionSiteId}>
             {planning ? <><span className="spinner" /> COMPUTING ROUTES</> : <><span>⌁</span> GENERATE ROUTE OPTIONS</>}
           </button>
           <button className="ghost-button" onClick={() => { const a = { x: Math.max(1, Math.floor((terrain?.width ?? 64) * 0.07)), y: Math.max(1, Math.floor((terrain?.height ?? 64) * 0.08)) }; const b = { x: Math.max(2, Math.floor((terrain?.width ?? 64) * 0.92)), y: Math.max(2, Math.floor((terrain?.height ?? 64) * 0.90)) }; setStart(a); setGoal(b); void runPlan(a, b); }}>RESET MISSION GEOMETRY</button>
@@ -345,7 +399,9 @@ export default function App() {
           </div>
 
           <div className="terrain-frame">
-            {terrain && <TerrainScene terrain={terrain} routes={routes} selectedRoute={selectedRoute} start={start} goal={goal} obstacles={addedObstacles} layer={layer} viewMode={viewMode} pickMode={pickMode} evaPosition={evaMode ? evaPosition : null} returnPath={evaMode ? returnPath : EMPTY_PATH} onPick={handlePick} />}
+            {terrain && terrain.site_id === selectedMissionSiteId && <TerrainScene key={terrain.id} terrain={terrain} routes={routes} selectedRoute={selectedRoute} start={start} goal={goal} obstacles={addedObstacles} layer={layer} viewMode={viewMode} pickMode={pickMode} evaPosition={evaMode ? evaPosition : null} returnPath={evaMode ? returnPath : EMPTY_PATH} onPick={handlePick} />}
+            {terrainLoading && <div className="terrain-loading-state"><span className="spinner" /> LOADING {selectedMissionSite.region.toUpperCase()} TERRAIN</div>}
+            {!terrain && !terrainLoading && <div className="terrain-loading-state terrain-error-state"><b>TERRAIN UNAVAILABLE</b><span>{error || `Could not load a terrain grid for ${selectedMissionSite.region}.`}</span></div>}
             <div className="scene-top-left"><span className="scene-tag"><i /> TERRAIN MODEL</span><span className="scene-tag muted">{terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'SYNTHETIC / NOT GEOREFERENCED' : 'IMPORTED GEOTIFF / VERIFY PROVENANCE'}</span></div>
             <div className="scene-top-right"><span className="compass">N</span><span className="compass-line" /></div>
             <div className="scene-bottom-left"><span>GRID CELL <b>{terrain?.cell_size_m?.toFixed(1) ?? '8.0'} m</b></span><span className="scene-vertical-note">VERTICAL EXAGGERATION <b>5×</b></span></div>
@@ -427,7 +483,7 @@ export default function App() {
 
           {activeTab === 'science' && <ScienceAssistant missionSite={selectedMissionSite} />}
 
-          {activeTab === 'data' && <DataExplorer missionSite={selectedMissionSite} sources={datasets} planId={plan?.plan_id} onTerrainImported={(nextTerrain) => { setTerrain(nextTerrain); setPlan(null); setRoutes([]); setBenchmarkResults([]); setError(''); setConditionNotice(''); setLayer('elevation'); const nextStart = { x: 4, y: 5 }; const nextGoal = { x: nextTerrain.width - 5, y: nextTerrain.height - 8 }; setStart(nextStart); setGoal(nextGoal); }} />}
+          {activeTab === 'data' && <DataExplorer missionSite={selectedMissionSite} sources={datasets} planId={plan?.plan_id} onTerrainImported={(nextTerrain) => { if (nextTerrain.site_id !== selectedMissionSiteId) { setError('The imported terrain belongs to a different mission site.'); return; } setTerrain(nextTerrain); setPlan(null); setRoutes([]); setBenchmarkResults([]); setError(''); setConditionNotice(''); setLayer('elevation'); const nextStart = { x: 4, y: 5 }; const nextGoal = { x: nextTerrain.width - 5, y: nextTerrain.height - 8 }; setStart(nextStart); setGoal(nextGoal); }} />}
         </aside>
       </main>
       <footer className="app-footer"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'SYNTHETIC DEMONSTRATION TILE' : 'IMPORTED DEM + UNKNOWN AUXILIARY LAYERS'}</span><span>NOT FOR OPERATIONAL USE</span></footer>

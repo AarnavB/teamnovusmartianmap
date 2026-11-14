@@ -16,7 +16,7 @@ from .lpa import LPAStar
 from .models import BenchmarkRequest, ConditionUpdateRequest, PlanRequest, ReplanRequest
 from .planner import MissionConstraints, build_route_set, route_metrics
 from .registry import get_registry
-from .terrain import Terrain, generate_terrain
+from .terrain import SITE_TERRAIN_PROFILES, Terrain, generate_site_terrain
 from .data_catalog import get_data_catalog
 from .services.archive_clients import ArchiveServiceError, search_pds, resolve_pds_product, search_ode
 from .domain.science_assistant import answer_question, load_evidence
@@ -44,13 +44,27 @@ def _configured_cors_origins() -> list[str]:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_configured_cors_origins(),
+    # Allow this Vercel project’s production domain and branch-preview domains.
+    # The pattern is restricted to this exact project slug, not all Vercel sites.
+    allow_origin_regex=r"^https://teamnovusmartianmap(?:-[a-z0-9-]+)?\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-TERRAIN: Terrain = generate_terrain()
+TERRAINS: dict[str, Terrain] = {
+    site_id: generate_site_terrain(site_id) for site_id in SITE_TERRAIN_PROFILES
+}
+# Backward-compatible default used by older clients and legacy package exports.
+TERRAIN: Terrain = TERRAINS["jezero"]
 PLAN_SESSIONS: dict[str, dict[str, Any]] = {}
+
+
+def _terrain_for_site(site_id: str) -> Terrain:
+    selected = TERRAINS.get(site_id)
+    if selected is None:
+        raise HTTPException(status_code=404, detail=f"Unknown mission site '{site_id}'.")
+    return selected
 
 @app.get("/api/jezero/pois")
 def jezero_pois() -> dict[str, Any]:
@@ -81,7 +95,14 @@ def health() -> dict[str, str]:
 
 @app.get("/api/terrain")
 def terrain() -> dict[str, Any]:
-    return TERRAIN.to_dict()
+    """Legacy endpoint: return the default Jezero terrain."""
+    return TERRAINS["jezero"].to_dict()
+
+
+@app.get("/api/terrain/{site_id}")
+def terrain_for_mission_site(site_id: str) -> dict[str, Any]:
+    """Return the isolated terrain grid registered for one mission site."""
+    return _terrain_for_site(site_id).to_dict()
 
 @app.get("/api/registry")
 def registry() -> dict[str, Any]:
@@ -96,18 +117,19 @@ def registry() -> dict[str, Any]:
 
 @app.post("/api/routes")
 def routes(payload: PlanRequest) -> dict[str, Any]:
+    active_terrain = _terrain_for_site(payload.site_id)
     start = (payload.start.x, payload.start.y)
     goal = (payload.goal.x, payload.goal.y)
     try:
         constraints = MissionConstraints.from_dict(payload.constraints)
-        route_set = build_route_set(TERRAIN, start, goal, constraints)
+        route_set = build_route_set(active_terrain, start, goal, constraints)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Retain an LPA* instance for the balanced policy. Later hazard updates
     # repair this graph incrementally rather than rebuilding its search state.
     try:
-        session_terrain = copy.deepcopy(TERRAIN)
+        session_terrain = copy.deepcopy(active_terrain)
         incremental = LPAStar(session_terrain, start, goal, constraints)
         incremental_path = incremental.extract_path()
         if not route_metrics(session_terrain, incremental_path, constraints)["return_feasible"]:
@@ -124,20 +146,22 @@ def routes(payload: PlanRequest) -> dict[str, Any]:
         "obstacles_added": [],
         "condition_updates": [],
         "routes": route_set,
-        "terrain_id": TERRAIN.terrain_id,
+        "terrain_id": active_terrain.terrain_id,
+        "site_id": payload.site_id,
         "created_utc": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
     }
 
     return {
         "plan_id": plan_id,
-        "terrain_id": TERRAIN.terrain_id,
+        "terrain_id": active_terrain.terrain_id,
+        "site_id": payload.site_id,
         "start": {"x": start[0], "y": start[1]},
         "goal": {"x": goal[0], "y": goal[1]},
         "constraints": constraints.__dict__,
         "routes": route_set,
         "incremental_balanced_path": [{"x": x, "y": y} for x, y in incremental_path],
         "incremental_algorithm": "Lifelong Planning A* (LPA*) with retained g/rhs state",
-        "scientific_note": "Routes use the currently active terrain grid. Check its provenance and georeferencing status; selected mission-site coordinates are reference points and are not automatically mapped to planner cells.",
+        "scientific_note": f"Routes use the {active_terrain.site_name} terrain grid. {active_terrain.warning}",
     }
 
 @app.post("/api/replan")
@@ -185,29 +209,34 @@ def replan(payload: ReplanRequest) -> dict[str, Any]:
 
 @app.post("/api/benchmark")
 def benchmark(payload: BenchmarkRequest) -> dict[str, Any]:
+    active_terrain = _terrain_for_site(payload.site_id)
     start = (payload.start.x, payload.start.y)
     goal = (payload.goal.x, payload.goal.y)
     try:
         constraints = MissionConstraints.from_dict(payload.constraints)
         results = [
-            scalar_baseline(TERRAIN, start, goal, constraints, "standard_astar"),
-            scalar_baseline(TERRAIN, start, goal, constraints, "dijkstra"),
-            scalar_baseline(TERRAIN, start, goal, constraints, "distance_only"),
+            scalar_baseline(active_terrain, start, goal, constraints, "standard_astar"),
+            scalar_baseline(active_terrain, start, goal, constraints, "dijkstra"),
+            scalar_baseline(active_terrain, start, goal, constraints, "distance_only"),
         ]
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
-        "benchmark_scope": "Same synthetic grid, hard constraints, and resource reserve; scalar A*/Dijkstra use balanced weights.",
+        "site_id": payload.site_id,
+        "terrain_id": active_terrain.terrain_id,
+        "benchmark_scope": f"Same {active_terrain.site_name} synthetic grid, hard constraints, and resource reserve; scalar A*/Dijkstra use balanced weights.",
         "results": results,
         "warning": "Runtime and route comparisons are local synthetic-fixture measurements, not evidence of performance on NASA rasters or field conditions.",
     }
 
 @app.post("/api/reset")
-def reset() -> dict[str, str]:
+def reset() -> dict[str, Any]:
     global TERRAIN
-    TERRAIN = generate_terrain()
+    for site_id in SITE_TERRAIN_PROFILES:
+        TERRAINS[site_id] = generate_site_terrain(site_id)
+    TERRAIN = TERRAINS["jezero"]
     PLAN_SESSIONS.clear()
-    return {"status": "reset", "terrain_id": TERRAIN.terrain_id}
+    return {"status": "reset", "terrain_ids": {site_id: item.terrain_id for site_id, item in TERRAINS.items()}}
 
 
 # ---------------------------------------------------------------------------
@@ -391,8 +420,15 @@ async def import_observations(
 
 
 @app.post("/api/terrain/import-dem")
-async def import_dem(file: UploadFile = File(...), width: int = Form(default=96), height: int = Form(default=96), vertical_units: str = Form(default="unspecified")) -> dict[str, Any]:
-    global TERRAIN
+async def import_dem(
+    file: UploadFile = File(...),
+    width: int = Form(default=96),
+    height: int = Form(default=96),
+    vertical_units: str = Form(default="unspecified"),
+    site_id: str = Form(default="jezero"),
+) -> dict[str, Any]:
+    if site_id not in SITE_TERRAIN_PROFILES:
+        raise HTTPException(status_code=404, detail=f"Unknown mission site '{site_id}'.")
     suffix = Path(file.filename or "terrain.tif").suffix.lower()
     if suffix not in {".tif", ".tiff"}:
         raise HTTPException(status_code=422, detail="Upload a GeoTIFF (.tif or .tiff).")
@@ -413,9 +449,24 @@ async def import_dem(file: UploadFile = File(...), width: int = Form(default=96)
         raise HTTPException(status_code=422, detail=f"Could not process the GeoTIFF: {exc}") from exc
     provenance_path = destination.with_suffix(destination.suffix + ".provenance.json")
     provenance_path.write_text(json.dumps(provenance, indent=2), encoding="utf-8")
-    TERRAIN = grid
-    PLAN_SESSIONS.clear()
-    return {"terrain": TERRAIN.to_dict(), "provenance": provenance, "stored_file": destination.name, "notice": "Active planner terrain replaced with a DEM-derived grid. Non-DEM environmental/science layers remain unavailable and are treated as unknown, not as zero risk."}
+    site_name, _, latitude, longitude_east = SITE_TERRAIN_PROFILES[site_id]
+    grid.site_id = site_id
+    grid.site_name = site_name
+    grid.terrain_id = f"mars-dem-{site_id}-{destination.stem}"
+    grid.coordinate_info = {
+        **(grid.coordinate_info or {}),
+        "selected_site_id": site_id,
+        "selected_site_name": site_name,
+        "site_reference_latitude": latitude,
+        "site_reference_longitude_east": longitude_east,
+        "site_coverage_verified": False,
+        "site_coverage_note": "The DEM CRS and transform were inspected during import; confirm its footprint covers this landing site before scientific interpretation.",
+    }
+    TERRAINS[site_id] = grid
+    for plan_id, session in list(PLAN_SESSIONS.items()):
+        if session.get("site_id") == site_id:
+            PLAN_SESSIONS.pop(plan_id, None)
+    return {"terrain": grid.to_dict(), "provenance": provenance, "stored_file": destination.name, "notice": f"Terrain for {site_name} replaced with the imported DEM-derived grid. Confirm its geographic footprint matches the selected site. Non-DEM environmental/science layers remain unavailable and are treated as unknown, not as zero risk."}
 
 
 @app.post("/api/terrain/import-layer")
@@ -426,11 +477,12 @@ async def import_terrain_layer(
     value_max: float = Form(...),
     band: int = Form(default=1),
     source_unit: str = Form(default="unspecified"),
+    site_id: str = Form(default="jezero"),
 ) -> dict[str, Any]:
-    """Align a user-selected official product band to an already imported DEM."""
-    global TERRAIN
-    if TERRAIN.status == "SIMULATED_NOT_GEOREFERENCED":
-        raise HTTPException(status_code=409, detail="Import a verified Mars DEM before adding aligned raster layers.")
+    """Align a user-selected official product band to the selected site's imported DEM."""
+    active_terrain = _terrain_for_site(site_id)
+    if active_terrain.status == "SIMULATED_NOT_GEOREFERENCED":
+        raise HTTPException(status_code=409, detail=f"Import a verified DEM for {active_terrain.site_name} before adding aligned raster layers.")
     suffix = Path(file.filename or "layer.tif").suffix.lower()
     if suffix not in {".tif", ".tiff"}:
         raise HTTPException(status_code=422, detail="Upload a georeferenced GeoTIFF (.tif or .tiff).")
@@ -442,7 +494,7 @@ async def import_terrain_layer(
     destination = data_root / f"layer-{uuid.uuid4().hex}{suffix}"
     destination.write_bytes(raw)
     try:
-        provenance = import_aligned_layer(destination, TERRAIN, layer=layer, value_min=value_min, value_max=value_max, band=band, source_unit=source_unit)
+        provenance = import_aligned_layer(destination, active_terrain, layer=layer, value_min=value_min, value_max=value_max, band=band, source_unit=source_unit)
     except (ValueError, RuntimeError) as exc:
         destination.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -451,8 +503,10 @@ async def import_terrain_layer(
         raise HTTPException(status_code=422, detail=f"Could not align the raster layer: {exc}") from exc
     provenance_path = destination.with_suffix(destination.suffix + ".provenance.json")
     provenance_path.write_text(json.dumps(provenance, indent=2), encoding="utf-8")
-    PLAN_SESSIONS.clear()
-    return {"terrain": TERRAIN.to_dict(), "provenance": provenance, "notice": f"Layer {layer} aligned to the active DEM. Recalculate route alternatives before interpreting them."}
+    for plan_id, session in list(PLAN_SESSIONS.items()):
+        if session.get("site_id") == site_id:
+            PLAN_SESSIONS.pop(plan_id, None)
+    return {"terrain": active_terrain.to_dict(), "provenance": provenance, "notice": f"Layer {layer} aligned to the {active_terrain.site_name} DEM. Recalculate route alternatives before interpreting them."}
 
 
 @app.get("/api/data/raster/inspect")
@@ -485,7 +539,8 @@ def offline_package(payload: dict[str, Any] = Body(default={})) -> FileResponse:
     root = Path(__file__).resolve().parent / "data"
     output_dir = root / "offline_packages"
     filename = f"marscope-offline-{uuid.uuid4().hex[:10]}.zip"
-    output = create_package(output=output_dir / filename, terrain=TERRAIN, plan=plan_data, data_root=root)
+    package_terrain = session["terrain"] if session else TERRAINS["jezero"]
+    output = create_package(output=output_dir / filename, terrain=package_terrain, plan=plan_data, data_root=root)
     return FileResponse(output, media_type="application/zip", filename=filename)
 
 
