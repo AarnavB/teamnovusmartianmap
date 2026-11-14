@@ -35,6 +35,8 @@ class Terrain:
     cell_units: str = "synthetic relative metres"
     layer_provenance: str = "Deterministic synthetic fixture."
     coordinate_info: dict[str, Any] = field(default_factory=dict)
+    site_id: str = "demo"
+    site_name: str = "Mars demo site"
 
     @property
     def max_path_distance_m(self) -> float:
@@ -54,7 +56,9 @@ class Terrain:
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.terrain_id,
-            "name": "Synthetic Martian teaching tile" if self.status == "SIMULATED_NOT_GEOREFERENCED" else "Imported Mars DEM route grid",
+            "site_id": self.site_id,
+            "site_name": self.site_name,
+            "name": f"{self.site_name} — synthetic demonstration grid" if self.status == "SIMULATED_NOT_GEOREFERENCED" else f"{self.site_name} — imported Mars DEM route grid",
             "status": self.status,
             "warning": self.warning,
             "width": self.width,
@@ -87,8 +91,22 @@ def _clamp(v: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, v))
 
 
-def generate_terrain(width: int = 64, height: int = 64, cell_m: float = 8.0, seed: int = 20261114) -> Terrain:
-    """Build a repeatable synthetic tile with ridges, hollows and rough patches."""
+def generate_terrain(
+    width: int = 64,
+    height: int = 64,
+    cell_m: float = 8.0,
+    seed: int = 20261114,
+    *,
+    site_id: str = "demo",
+    site_name: str = "Mars demo site",
+    reference_latitude: float | None = None,
+    reference_longitude_east: float | None = None,
+) -> Terrain:
+    """Build a deterministic synthetic teaching tile, never a site DEM.
+
+    Distinct seeds create different demonstration surfaces for the UI and
+    planner tests. The generated cells are not real Martian topography.
+    """
     if width < 16 or height < 16:
         raise ValueError("Terrain dimensions must both be at least 16 cells")
     rng = random.Random(seed)
@@ -102,20 +120,22 @@ def generate_terrain(width: int = 64, height: int = 64, cell_m: float = 8.0, see
     science = [[0.0 for _ in range(width)] for _ in range(height)]
     obstacles = [[False for _ in range(width)] for _ in range(height)]
 
-    # Ridges and depressions are visual motifs only; they are not mapped features.
+    # Seeded feature geometry makes each site's teaching tile visibly distinct.
+    phase_x = rng.uniform(-math.pi, math.pi)
+    phase_y = rng.uniform(-math.pi, math.pi)
     ridge_specs = [
-        (width * 0.28, height * 0.30, width * 0.23, height * 0.055, 18.0),
-        (width * 0.65, height * 0.62, width * 0.27, height * 0.065, 14.0),
-        (width * 0.48, height * 0.82, width * 0.17, height * 0.045, 10.0),
+        (width * rng.uniform(0.18, 0.38), height * rng.uniform(0.20, 0.43), width * rng.uniform(0.16, 0.27), height * rng.uniform(0.04, 0.075), rng.uniform(13.0, 24.0)),
+        (width * rng.uniform(0.57, 0.82), height * rng.uniform(0.48, 0.72), width * rng.uniform(0.18, 0.30), height * rng.uniform(0.045, 0.085), rng.uniform(10.0, 20.0)),
+        (width * rng.uniform(0.32, 0.60), height * rng.uniform(0.70, 0.88), width * rng.uniform(0.12, 0.22), height * rng.uniform(0.035, 0.06), rng.uniform(7.0, 15.0)),
     ]
     hollow_specs = [
-        (width * 0.48, height * 0.32, width * 0.10, height * 0.10, -8.0),
-        (width * 0.75, height * 0.40, width * 0.12, height * 0.10, -6.0),
+        (width * rng.uniform(0.35, 0.55), height * rng.uniform(0.20, 0.43), width * rng.uniform(0.08, 0.15), height * rng.uniform(0.08, 0.15), rng.uniform(-10.0, -5.0)),
+        (width * rng.uniform(0.65, 0.84), height * rng.uniform(0.30, 0.53), width * rng.uniform(0.09, 0.16), height * rng.uniform(0.08, 0.14), rng.uniform(-8.0, -4.0)),
     ]
 
     for y in range(height):
         for x in range(width):
-            base = 4.5 * math.sin(x / 8.0) + 3.2 * math.cos(y / 9.0) + 1.8 * math.sin((x + y) / 5.4)
+            base = 4.5 * math.sin(x / 8.0 + phase_x) + 3.2 * math.cos(y / 9.0 + phase_y) + 1.8 * math.sin((x + y) / 5.4 + phase_x * 0.35)
             ridge = sum(a * _gaussian(x, y, cx, cy, sx, sy) for cx, cy, sx, sy, a in ridge_specs)
             hollows = sum(a * _gaussian(x, y, cx, cy, sx, sy) for cx, cy, sx, sy, a in hollow_specs)
             texture = rng.uniform(-1.25, 1.25)
@@ -175,9 +195,44 @@ def generate_terrain(width: int = 64, height: int = 64, cell_m: float = 8.0, see
         uncertainty=uncertainty, science_potential=science, obstacle=obstacles,
         targets=targets, seed=seed,
         available_layers={"elevation", "slope", "roughness", "regolith", "temperature", "atmosphere", "radiation", "uncertainty", "science"},
-        terrain_id="mars-demo-synthetic-01", status="SIMULATED_NOT_GEOREFERENCED",
-        warning="Generated terrain for algorithm demonstration only. This is not a geographic crop of any selected Mars mission site and contains no measured NASA elevation or hazard values.",
+        terrain_id=f"mars-demo-{site_id}-{seed}", status="SIMULATED_NOT_GEOREFERENCED",
+        warning=f"Deterministic synthetic terrain variant for {site_name}. This is not a geographic crop or measured elevation/hazard dataset for this landing site.",
         cell_units="synthetic relative metres",
-        layer_provenance="Generated deterministically by backend/app/terrain.py; values are not actual Mars measurements.",
-        coordinate_info={},
+        layer_provenance=f"Generated by backend/app/terrain.py with seed {seed}; values are not actual Mars measurements.",
+        coordinate_info={
+            "georeferenced": False,
+            "site_reference_latitude": reference_latitude,
+            "site_reference_longitude_east": reference_longitude_east,
+            "coordinate_note": "Landing-site coordinates are references only and are not mapped to this synthetic grid.",
+        },
+        site_id=site_id,
+        site_name=site_name,
+    )
+
+
+SITE_TERRAIN_PROFILES: dict[str, tuple[str, int, float, float]] = {
+    "jezero": ("Jezero Crater", 20261114, 18.44463, 77.45088),
+    "gale": ("Gale Crater", 20261115, -4.59, 137.44),
+    "gusev": ("Gusev Crater", 20261116, -14.5692, 175.4729),
+    "meridiani": ("Meridiani Planum", 20261117, -1.9462, 354.4734),
+    "elysium": ("Elysium Planitia", 20261118, 4.5, 135.9),
+    "ares": ("Ares Vallis", 20261119, 326.747 and 19.095, 326.747),
+    "chryse": ("Chryse Planitia", 20261120, 22.269, 312.049),
+    "utopia": ("Utopia Planitia", 20261121, 47.668, 134.28),
+    "vastitas": ("Vastitas Borealis", 20261122, 68.22, 234.25),
+}
+
+
+def generate_site_terrain(site_id: str) -> Terrain:
+    """Return a site-labelled synthetic grid, not a real geographic DEM."""
+    try:
+        site_name, seed, latitude, longitude_east = SITE_TERRAIN_PROFILES[site_id]
+    except KeyError as exc:
+        raise ValueError(f"Unknown mission site '{site_id}'.") from exc
+    return generate_terrain(
+        seed=seed,
+        site_id=site_id,
+        site_name=site_name,
+        reference_latitude=latitude,
+        reference_longitude_east=longitude_east,
     )
