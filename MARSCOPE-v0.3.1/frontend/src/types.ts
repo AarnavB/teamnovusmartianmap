@@ -1,5 +1,14 @@
 export type Point = { x: number; y: number };
 
+export type JezeroPoi = {
+  id: string; name: string; latitude: number; longitude: number;
+  description: string; approximate: boolean; grid: Point | null; status: string;
+};
+export type JezeroPoisResponse = {
+  terrain_id: string; terrain_status: string; grid_width: number; grid_height: number;
+  cell_size_m: number; pois: JezeroPoi[]; coordinate_policy: string; notice: string;
+};
+
 export type PlannerObjective = 'distance' | 'time' | 'energy' | 'terrain_risk' | 'environment_risk' | 'radiation' | 'uncertainty' | 'science_opportunity_cost' | 'oxygen';
 export type MissionConstraintsPayload = {
   max_slope_deg?: number;
