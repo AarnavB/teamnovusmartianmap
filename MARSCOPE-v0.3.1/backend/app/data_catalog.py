@@ -45,6 +45,13 @@ SOURCES = [
         "limitations": "Spectral detection is not direct field confirmation and CRISM spatial footprints are much coarser than rover-scale structures."
     },
     {
+        "id": "usgs-jezero-ctx-dem", "name": "USGS Mars 2020 Science Investigation CTX DEM Mosaic", "organization": "USGS Astrogeology Science Center", "kind": "digital_elevation_model",
+        "url": "https://astrogeology.usgs.gov/search/map/mars_2020_science_investigation_ctx_dem_mosaic", "documentation": "https://astrogeology.usgs.gov/search/map/mars_2020_science_investigation_ctx_dem_mosaic",
+        "format": "GeoTIFF", "coverage": "Jezero Crater and surrounding Mars 2020 science investigation area", "availability": "public_download",
+        "integration": "explicit_geotiff_import", "description": "Regional CTX stereo-derived elevation mosaic at nominal 20 m/pixel. The existing MARSCOPE GeoTIFF importer derives planner-grid elevation, slope and roughness.",
+        "limitations": "Inspect embedded CRS, planetocentric/planetographic conventions, affine transform, NoData and units. A 20 m DEM does not resolve every local obstacle and does not supply radiation, temperature or science-potential grids."
+    },
+    {
         "id": "mola-archive", "name": "MOLA MEGDR / PEDR", "organization": "NASA/JPL / PDS Geosciences Node", "kind": "topography_archive",
         "url": "https://pds-geosciences.wustl.edu/missions/mgs/megdr.html", "documentation": "https://ode.rsl.wustl.edu/mars/tools.aspx",
         "format": "PDS IMG / gridded data / altimetry tables", "coverage": "Global or regional products depending on product", "availability": "public_archive",

@@ -22,6 +22,7 @@ from .domain.science_assistant import answer_question, load_evidence
 from .domain.observation_ingest import import_observation_csv
 from .domain.observation_store import save_observation_import, list_observation_imports, get_observation_import
 from .domain.raster_pipeline import dem_to_terrain, inspect_geotiff, import_aligned_layer
+from .domain.jezero import load_jezero_pois, poi_to_grid
 from .domain.offline_package import create_package
 from .domain.pds_labels import inspect_label as inspect_pds_label, save_label as save_pds_label
 from .services.wmts import LAYERS as WMTS_LAYERS, get_capabilities as get_wmts_capabilities, download_tile_cache, inspect_cached_packages
@@ -98,14 +99,14 @@ def routes(payload: PlanRequest) -> dict[str, Any]:
 
     return {
         "plan_id": plan_id,
-        "terrain_id": "gale-demo-synthetic-01",
+        "terrain_id": TERRAIN.terrain_id,
         "start": {"x": start[0], "y": start[1]},
         "goal": {"x": goal[0], "y": goal[1]},
         "constraints": constraints.__dict__,
         "routes": route_set,
         "incremental_balanced_path": [{"x": x, "y": y} for x, y in incremental_path],
         "incremental_algorithm": "Lifelong Planning A* (LPA*) with retained g/rhs state",
-        "scientific_note": "All route results are calculated on the deterministic synthetic tile, not on a NASA terrain raster.",
+        "scientific_note": ("All route results use the imported DEM-derived grid. Only elevation, slope and roughness are spatially derived; other unavailable layers are excluded." if TERRAIN.status != "SIMULATED_NOT_GEOREFERENCED" else "All route results are calculated on the deterministic synthetic tile, not on a NASA terrain raster."),
     }
 
 @app.post("/api/replan")
@@ -520,3 +521,29 @@ def replan_condition(payload: ConditionUpdateRequest) -> dict[str, Any]:
         "condition_updates": session["condition_updates"],
         "notice": "This is a simulated local condition update, not a live Mars weather or hazard observation.",
     }
+
+
+
+@app.get("/api/jezero/pois")
+def jezero_pois() -> dict[str, Any]:
+    """Return curated Jezero POIs mapped to the active terrain grid when possible."""
+    try:
+        records = load_jezero_pois()
+        mapped = []
+        for poi in records:
+            mapped.append({
+                **poi,
+                **poi_to_grid(poi, TERRAIN),
+            })
+        return {
+            "terrain_id": TERRAIN.terrain_id,
+            "terrain_status": TERRAIN.status,
+            "grid_width": TERRAIN.width,
+            "grid_height": TERRAIN.height,
+            "cell_size_m": TERRAIN.cell_m,
+            "pois": mapped,
+            "coordinate_policy": "POIs use planetocentric latitude and positive-east longitude; conversion uses the active DEM's embedded Mars CRS.",
+            "notice": "Approximate geological scene markers are not surveyed centroids. A mapped POI may still be blocked by NoData or terrain constraints.",
+        }
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Could not map Jezero POIs: {exc}") from exc
