@@ -54,7 +54,7 @@ class Terrain:
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.terrain_id,
-            "name": "Synthetic Mount Sharp teaching tile" if self.status == "SIMULATED_NOT_GEOREFERENCED" else "Imported Mars DEM route grid",
+            "name": "Synthetic Jezero demonstration tile (not georeferenced)" if self.status == "SIMULATED_NOT_GEOREFERENCED" else "Imported Mars DEM route grid",
             "status": self.status,
             "warning": self.warning,
             "width": self.width,
