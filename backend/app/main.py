@@ -52,6 +52,29 @@ app.add_middleware(
 TERRAIN: Terrain = generate_terrain()
 PLAN_SESSIONS: dict[str, dict[str, Any]] = {}
 
+@app.get("/api/jezero/pois")
+def jezero_pois() -> dict[str, Any]:
+    """Return documented Jezero-area reference points; coordinates are not planner grid cells."""
+    return {
+        "site": "Jezero Crater, Mars",
+        "coordinate_convention": "Planetocentric latitude, east-positive longitude, degrees",
+        "dem": {
+            "name": "USGS M20 Jezero Crater CTX DEM Mosaic",
+            "url": "https://planetarymaps.usgs.gov/mosaic/mars2020_trn/CTX/ScienceInvestigationMaps_JPL/M20_JezeroCrater_CTXDEM_20m.tif",
+            "documentation": "https://astrogeology.usgs.gov/search/map/mars_2020_science_investigation_ctx_dem_mosaic",
+            "pixel_scale_m": 20,
+            "format": "GeoTIFF",
+            "vertical_units": "metres (verify source label before import)",
+        },
+        "points": [
+            {"id": "jezero-centre", "name": "Jezero Crater Centre", "latitude": 18.4100, "longitude_east": 77.6900, "precision": "approximate reference point", "description": "Regional reference point for the Jezero study area."},
+            {"id": "perseverance-landing", "name": "Perseverance Landing Site", "latitude": 18.44463, "longitude_east": 77.45088, "precision": "published landing-site coordinate", "description": "Rover landing location in Jezero Crater."},
+            {"id": "neretva-vallis", "name": "Neretva Vallis", "latitude": 18.4006, "longitude_east": 77.1860, "precision": "approximate reference point", "description": "Western inlet-channel area."},
+            {"id": "western-delta", "name": "Western Delta Area", "latitude": 18.3512, "longitude_east": 77.2757, "precision": "approximate reference point", "description": "Western delta study area."},
+        ],
+        "notice": "These are geographic reference points, not verified pixels or grid coordinates. Route planning remains on the currently active terrain grid until a CRS-checked Jezero DEM is imported and mapped to the planner grid.",
+    }
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "project": "MARSCOPE", "release": "0.3.1"}
