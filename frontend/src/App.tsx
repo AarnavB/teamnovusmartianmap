@@ -301,6 +301,7 @@ export default function App() {
             <div className="mission-site-coordinate">
               <span>LANDING-SITE REFERENCE</span>
               <strong>{formatLatitude(selectedMissionSite.latitude)} · {formatLongitude(selectedMissionSite.longitudeEast)}</strong>
+              <small>{selectedMissionSite.coordinateNote} · planetocentric latitude, east-positive longitude</small>
             </div>
             <div className="mission-site-focus"><b>{selectedMissionSite.focusLabel}</b><span>{selectedMissionSite.focus}</span></div>
             <a href={selectedMissionSite.coordinateSourceUrl} target="_blank" rel="noreferrer">{selectedMissionSite.coordinateSource} ↗</a>
