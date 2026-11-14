@@ -108,7 +108,6 @@ export default function TerrainScene(props: Props) {
     const indices: number[] = [];
     const values = props.terrain.elevation_m.flat();
     const min = Math.min(...values);
-    const max = Math.max(...values);
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const z = ((props.terrain.elevation_m[y][x] - min) / Math.max(props.terrain.cell_size_m, 1e-6)) * VERTICAL_EXAGGERATION;

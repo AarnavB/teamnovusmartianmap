@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import type { OfficialSource, TerrainData } from '../types';
+import type { JezeroPoisResponse, OfficialSource, TerrainData } from '../types';
 
 type ArchiveResult = { archive: string; endpoint: string; query: Record<string, unknown>; record_count: number; records: Record<string, unknown>[]; raw: unknown; documentation: string; note: string };
 type ObservationImport = { instrument: string; source_file: string; sha256: string; imported_utc: string; row_count: number; summary: Record<string, unknown>; provenance_note: string };
@@ -38,6 +38,16 @@ export default function DataExplorer({ sources, planId, onTerrainImported }: { s
   const [labelFile, setLabelFile] = useState<File | null>(null);
   const [labelResult, setLabelResult] = useState<Record<string, unknown> | null>(null);
   const [demVerticalUnits, setDemVerticalUnits] = useState('unspecified');
+  const [jezero, setJezero] = useState<JezeroPoisResponse | null>(null);
+  const [jezeroError, setJezeroError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    api.jezeroPois()
+      .then((result) => { if (alive) setJezero(result); })
+      .catch((err: Error) => { if (alive) setJezeroError(err.message); });
+    return () => { alive = false; };
+  }, []);
 
   const refreshObservations = async () => {
     try { const result = await api.observations(); setObservations(result.imports); }
@@ -234,6 +244,27 @@ export default function DataExplorer({ sources, planId, onTerrainImported }: { s
     </section>
 
     {(error || notice) && <div className={error ? 'error-banner' : 'success-note'}>{error || notice}</div>}
+
+
+    <section className="archive-search-card">
+      <div className="archive-section-head"><b>JEZERO CRATER / REFERENCE LOCATIONS</b><span className="connected-tag">BACKEND API</span></div>
+      <p>Reference locations are loaded from the FastAPI Jezero endpoint. Coordinates use planetocentric latitude and east-positive longitude.</p>
+      {jezero ? <>
+        <div className="archive-record"><b>{jezero.site}</b><small>{jezero.coordinate_convention}</small></div>
+        {jezero.points.map((point) => <div className="archive-record" key={point.id}>
+          <b>{point.name}</b>
+          <small>{point.latitude.toFixed(5)}° N · {point.longitude_east.toFixed(5)}° E</small>
+          <small>{point.precision} · {point.description}</small>
+        </div>)}
+        <div className="archive-record">
+          <b>{jezero.dem.name}</b>
+          <small>{jezero.dem.pixel_scale_m} m/pixel · {jezero.dem.format} · {jezero.dem.vertical_units}</small>
+          <a href={jezero.dem.url} target="_blank" rel="noreferrer">DOWNLOAD JEZERO DEM ↗</a>
+          <a href={jezero.dem.documentation} target="_blank" rel="noreferrer">USGS PRODUCT DOCUMENTATION ↗</a>
+        </div>
+        <small>{jezero.notice}</small>
+      </> : <div className={jezeroError ? 'error-banner' : 'archive-empty'}>{jezeroError ? `Could not load Jezero locations: ${jezeroError}` : 'Loading Jezero reference locations…'}</div>}
+    </section>
 
     <div className="data-source-list"><div className="target-list-head"><span className="eyebrow">OFFICIAL SOURCE CATALOG</span><span className="demo-tag">{sources.length} SOURCES</span></div>
       {sources.map((source) => <div className="dataset-row" key={source.id}><div className="dataset-top"><b>{source.name}</b><span className={source.integration === 'connected' ? 'connected-tag' : 'doc-status'}>{source.integration.replace(/_/g, ' ').toUpperCase()}</span></div><small>{source.organization} · {source.kind}</small><div className="dataset-detail">{source.description}</div><div className="dataset-detail muted-copy">Coverage: {source.coverage}</div><div className="dataset-detail muted-copy">Limit: {source.limitations}</div><a href={source.url} target="_blank" rel="noreferrer">OFFICIAL SOURCE ↗</a></div>)}
