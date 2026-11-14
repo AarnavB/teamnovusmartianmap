@@ -186,3 +186,20 @@ export type OfflineStatus = {
   warnings: string[];
   availability_scope: string;
 };
+
+
+export type JezeroPoi = {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude_east: number;
+  precision: string;
+  description: string;
+};
+export type JezeroPoisResponse = {
+  site: string;
+  coordinate_convention: string;
+  dem: { name: string; url: string; documentation: string; pixel_scale_m: number; format: string; vertical_units: string };
+  points: JezeroPoi[];
+  notice: string;
+};
