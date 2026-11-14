@@ -1,0 +1,5 @@
+MARSCOPE v0.1.0
+=================
+
+This folder contains MARSCOPE v0.1.0.
+Follow README.md for setup instructions.

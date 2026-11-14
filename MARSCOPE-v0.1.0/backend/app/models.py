@@ -1,0 +1,24 @@
+from pydantic import BaseModel, Field
+
+
+class Point(BaseModel):
+    x: int = Field(ge=0)
+    y: int = Field(ge=0)
+
+
+class PlanRequest(BaseModel):
+    start: Point
+    goal: Point
+    constraints: dict = Field(default_factory=dict)
+
+
+class ReplanRequest(BaseModel):
+    plan_id: str
+    obstacle: Point
+
+
+
+class BenchmarkRequest(BaseModel):
+    start: Point
+    goal: Point
+    constraints: dict = Field(default_factory=dict)

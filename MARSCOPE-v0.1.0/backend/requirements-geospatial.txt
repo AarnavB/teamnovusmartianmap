@@ -1,0 +1,3 @@
+# Install separately after reviewing your platform's GDAL/PROJ packaging.
+# Recommended: conda-forge environment with compatible GDAL, PROJ and Rasterio.
+rasterio>=1.3
