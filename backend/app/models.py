@@ -7,6 +7,7 @@ class Point(BaseModel):
 
 
 class PlanRequest(BaseModel):
+    site_id: str = "jezero"
     start: Point
     goal: Point
     constraints: dict = Field(default_factory=dict)
@@ -19,6 +20,7 @@ class ReplanRequest(BaseModel):
 
 
 class BenchmarkRequest(BaseModel):
+    site_id: str = "jezero"
     start: Point
     goal: Point
     constraints: dict = Field(default_factory=dict)
