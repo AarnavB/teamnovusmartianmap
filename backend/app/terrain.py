@@ -29,7 +29,7 @@ class Terrain:
     targets: list[dict[str, Any]]
     seed: int = 20261114
     available_layers: set[str] = field(default_factory=lambda: {"elevation", "slope", "roughness", "regolith", "temperature", "atmosphere", "radiation", "uncertainty", "science"})
-    terrain_id: str = "gale-demo-synthetic-01"
+    terrain_id: str = "mars-demo-synthetic-01"
     status: str = "SIMULATED_NOT_GEOREFERENCED"
     warning: str = "Generated terrain for algorithm demonstration only."
     cell_units: str = "synthetic relative metres"
@@ -54,7 +54,7 @@ class Terrain:
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.terrain_id,
-            "name": "Synthetic Mount Sharp teaching tile" if self.status == "SIMULATED_NOT_GEOREFERENCED" else "Imported Mars DEM route grid",
+            "name": "Synthetic Martian teaching tile" if self.status == "SIMULATED_NOT_GEOREFERENCED" else "Imported Mars DEM route grid",
             "status": self.status,
             "warning": self.warning,
             "width": self.width,
@@ -175,8 +175,8 @@ def generate_terrain(width: int = 64, height: int = 64, cell_m: float = 8.0, see
         uncertainty=uncertainty, science_potential=science, obstacle=obstacles,
         targets=targets, seed=seed,
         available_layers={"elevation", "slope", "roughness", "regolith", "temperature", "atmosphere", "radiation", "uncertainty", "science"},
-        terrain_id="gale-demo-synthetic-01", status="SIMULATED_NOT_GEOREFERENCED",
-        warning="Generated terrain for algorithm demonstration only. This is not a geographic crop of Gale Crater and contains no measured NASA elevation or hazard values.",
+        terrain_id="mars-demo-synthetic-01", status="SIMULATED_NOT_GEOREFERENCED",
+        warning="Generated terrain for algorithm demonstration only. This is not a geographic crop of any selected Mars mission site and contains no measured NASA elevation or hazard values.",
         cell_units="synthetic relative metres",
         layer_provenance="Generated deterministically by backend/app/terrain.py; values are not actual Mars measurements.",
         coordinate_info={},
