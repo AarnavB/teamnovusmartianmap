@@ -2,18 +2,18 @@
 
 **Release:** 0.3.1
 **Type:** research / hackathon prototype
-**Demonstration region:** Mount Sharp, Gale Crater
+**Mission-site profiles:** historic Mars landing areas; default profile: Jezero Crater
 **Primary rule:** never present simulated values as NASA observations.
 
 MARSCOPE combines a multi-objective traversal planner with official planetary archive discovery, provenance-aware data import, a cited science assistant, and an offline review package. The code is modular so data providers can be extended without rewriting the planner.
 
-> **Research prototype only.** The default terrain is a deterministic synthetic teaching grid. It is not a geographic crop of Gale Crater. The system is not certified navigation software and must not be used to guide real people or real EVA operations. The mobility, energy, oxygen and time estimates are illustrative assumptions, not validated human-performance predictions.
+> **Research prototype only.** The default terrain is a deterministic synthetic teaching grid. It is not a geographic crop of the selected mission site. The system is not certified navigation software and must not be used to guide real people or real EVA operations. The mobility, energy, oxygen and time estimates are illustrative assumptions, not validated human-performance predictions.
 
 ## What is implemented
 
 ### Planning and simulation
 
-- Bounded Pareto-label multi-objective A* with non-negative normalized edge costs.
+- Selectable historic Mars mission-site profiles (Jezero, Gale, Gusev, Meridiani Planum, Elysium Planitia, Ares Vallis, Chryse Planitia, Utopia Planitia and Vastitas Borealis), with landing-site reference coordinates and source links. These profiles set mission context only; they do not move or georeference the planner grid.\n- Bounded Pareto-label multi-objective A* with non-negative normalized edge costs.
 - Conservative, balanced and science-first route policies.
 - User-adjustable objective multipliers, renormalized after unavailable data layers are removed.
 - Hard exclusions for obstacles, configured slope and available temperature layers; no diagonal corner-cutting.
@@ -43,7 +43,7 @@ MARSCOPE combines a multi-objective traversal planner with official planetary ar
 
 ## What this release does not claim to do
 
-The official archives are connected for **discovery and selected file retrieval**, but the app does not ship a preloaded, georeferenced Mount Sharp science stack. The following remain deliberate boundaries:
+The official archives are connected for **discovery and selected file retrieval**, but the app does not ship a preloaded, georeferenced science stack for every selectable mission site. The following remain deliberate boundaries:
 
 - No automatic science interpretation of arbitrary PDS binary products. Product-specific labels, SIS documentation, calibration, SPICE/localization and projection checks remain necessary.
 - WMTS tiles can be cached for review, but are not currently draped as a georegistered basemap in the planner's terrain mesh. They are not a DEM.
