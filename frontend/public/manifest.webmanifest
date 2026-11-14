@@ -1,0 +1,10 @@
+{
+  "name": "MARSCOPE | From Orbit to Bootprint",
+  "short_name": "MARSCOPE",
+  "description": "Research prototype for Mars planetary data exploration and route planning.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#101316",
+  "theme_color": "#101316",
+  "icons": []
+}
