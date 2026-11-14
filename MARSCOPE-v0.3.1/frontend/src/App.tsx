@@ -3,7 +3,7 @@ import TerrainScene from './components/TerrainScene';
 import DataExplorer from './components/DataExplorer';
 import ScienceAssistant from './components/ScienceAssistant';
 import { api } from './api';
-import type { BenchmarkResult, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, Route, TerrainData } from './types';
+import type { BenchmarkResult, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, Route, TerrainData, JezeroPoi } from './types';
 
 type Layer = 'elevation' | 'slope' | 'roughness' | 'regolith' | 'temperature' | 'environment' | 'radiation' | 'uncertainty' | 'science';
 const INITIAL_START: Point = { x: 4, y: 5 };
@@ -71,6 +71,7 @@ export default function App() {
   const [status, setStatus] = useState('CONNECTING');
   const [evaProgressIndex, setEvaProgressIndex] = useState(0);
   const [offlineStatus, setOfflineStatus] = useState<OfflineStatus | null>(null);
+  const [jezeroPois, setJezeroPois] = useState<JezeroPoi[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -89,6 +90,27 @@ export default function App() {
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
   }, []);
+
+  useEffect(() => {
+    if (!terrain) return;
+    let alive = true;
+    api.jezeroPois().then((result) => {
+      if (alive) setJezeroPois(result.pois);
+    }).catch(() => {
+      if (alive) setJezeroPois([]);
+    });
+    return () => { alive = false; };
+  }, [terrain?.id]);
+
+  useEffect(() => {
+    if (terrain?.status === 'SIMULATED_NOT_GEOREFERENCED') return;
+    const landing = jezeroPois.find((poi) => poi.id === 'perseverance-landing-site' && poi.grid);
+    const delta = jezeroPois.find((poi) => poi.id === 'western-delta-area' && poi.grid);
+    if (landing?.grid && delta?.grid) {
+      setStart(landing.grid);
+      setGoal(delta.grid);
+    }
+  }, [jezeroPois, terrain?.status]);
 
   const runPlan = useCallback(async (newStart = start, newGoal = goal) => {
     setPlanning(true);
@@ -278,15 +300,24 @@ export default function App() {
           <div className="rail-head"><span className="eyebrow">MISSION AREA</span><span className="live-chip">{terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'SIMULATION' : 'IMPORTED DEM'}</span></div>
           <div className="location-card">
             <div className="planet-glyph">♂</div>
-            <div className="location-copy"><strong>Mount Sharp</strong><span>Gale Crater · Mars</span></div>
+            <div className="location-copy"><strong>Jezero Crater</strong><span>Jezero Crater · Mars 2020 landing region</span></div>
             <div className="location-chevron">⌄</div>
           </div>
           <div className="section-kicker">MISSION PLANNING</div>
           <div className="field-stack">
             <div className="field-label"><span>01 / START POINT</span><button className={`tiny-action ${pickMode === 'start' ? 'active' : ''}`} onClick={() => setPickMode(pickMode === 'start' ? null : 'start')}>PICK ON MAP</button></div>
-            <div className="coord-card"><span className="point-symbol start-symbol">A</span><div><b>{pointText(start)}</b><small>Grid reference · synthetic tile</small></div></div>
+            <div className="coord-card"><span className="point-symbol start-symbol">A</span><div><b>{pointText(start)}</b><small>{terrain?.status === "SIMULATED_NOT_GEOREFERENCED" ? "Grid reference · synthetic tile" : "Grid reference · imported Jezero DEM"}</small></div></div>
+            <select aria-label="Choose Jezero start point" value="" onChange={(event) => { const poi = jezeroPois.find((item) => item.id === event.target.value); if (poi?.grid) setStart(poi.grid); }}>
+              <option value="">Choose Jezero start point…</option>
+              {jezeroPois.filter((poi) => poi.grid).map((poi) => <option key={poi.id} value={poi.id}>{poi.name}</option>)}
+            </select>
             <div className="field-label"><span>02 / DESTINATION</span><button className={`tiny-action ${pickMode === 'goal' ? 'active' : ''}`} onClick={() => setPickMode(pickMode === 'goal' ? null : 'goal')}>PICK ON MAP</button></div>
-            <div className="coord-card"><span className="point-symbol goal-symbol">B</span><div><b>{pointText(goal)}</b><small>Grid reference · synthetic tile</small></div></div>
+            <div className="coord-card"><span className="point-symbol goal-symbol">B</span><div><b>{pointText(goal)}</b><small>{terrain?.status === "SIMULATED_NOT_GEOREFERENCED" ? "Grid reference · synthetic tile" : "Grid reference · imported Jezero DEM"}</small></div></div>
+            <select aria-label="Choose Jezero destination" value="" onChange={(event) => { const poi = jezeroPois.find((item) => item.id === event.target.value); if (poi?.grid) setGoal(poi.grid); }}>
+              <option value="">Choose Jezero destination…</option>
+              {jezeroPois.filter((poi) => poi.grid).map((poi) => <option key={poi.id} value={poi.id}>{poi.name}</option>)}
+            </select>
+            {terrain?.status !== "SIMULATED_NOT_GEOREFERENCED" && jezeroPois.every((poi) => !poi.grid) && <small>POIs are not inside the active DEM footprint. Check the DEM CRS and coverage.</small> }
             {pickMode && <div className="pick-hint">Click a location on the terrain to set the {pickMode === 'start' ? 'start point' : 'destination'}.</div>}
           </div>
 
