@@ -13,7 +13,8 @@ MARSCOPE combines a multi-objective traversal planner with official planetary ar
 
 ### Planning and simulation
 
-- Selectable historic Mars mission-site profiles (Jezero, Gale, Gusev, Meridiani Planum, Elysium Planitia, Ares Vallis, Chryse Planitia, Utopia Planitia and Vastitas Borealis), with landing-site reference coordinates and source links. These profiles set mission context only; they do not move or georeference the planner grid.\n- Bounded Pareto-label multi-objective A* with non-negative normalized edge costs.
+- Selectable historic Mars mission-site profiles (Jezero, Gale, Gusev, Meridiani Planum, Elysium Planitia, Ares Vallis, Chryse Planitia, Utopia Planitia and Vastitas Borealis), with landing-site reference coordinates and source links. These profiles set mission context only; they do not move or georeference the planner grid.
+- Bounded Pareto-label multi-objective A* with non-negative normalized edge costs.
 - Conservative, balanced and science-first route policies.
 - User-adjustable objective multipliers, renormalized after unavailable data layers are removed.
 - Hard exclusions for obstacles, configured slope and available temperature layers; no diagonal corner-cutting.
