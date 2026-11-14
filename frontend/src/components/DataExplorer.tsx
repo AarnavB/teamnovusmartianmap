@@ -99,7 +99,16 @@ export default function DataExplorer({ sources, planId, onTerrainImported, missi
 
   const runOdeSearch = async () => {
     setLoading('ode'); setError(''); setNotice('');
-    try { setOdeResult(await api.odeSearch(instrument, { minLat: -6.5733, maxLat: -2.8078, westLon: 135.1843, eastLon: 139.2413, limit: 40 })); }
+    try {
+      const searchPaddingDegrees = 1.5;
+      setOdeResult(await api.odeSearch(instrument, {
+        minLat: Math.max(-90, missionSite.latitude - searchPaddingDegrees),
+        maxLat: Math.min(90, missionSite.latitude + searchPaddingDegrees),
+        westLon: missionSite.longitudeEast - searchPaddingDegrees,
+        eastLon: missionSite.longitudeEast + searchPaddingDegrees,
+        limit: 40,
+      }));
+    }
     catch (err) { setError(err instanceof Error ? err.message : 'ODE search failed'); }
     finally { setLoading(null); }
   };
@@ -198,7 +207,7 @@ export default function DataExplorer({ sources, planId, onTerrainImported, missi
 
     <section className="archive-search-card">
       <div className="archive-section-head"><b>03 / MARS ORBITAL DATA EXPLORER</b><span className="connected-tag">ODE REST</span></div>
-      <p>Searches product footprints intersecting the Gale Crater region. ODE uses east-positive longitudes in the query; verify each product's map-projection label.</p>
+      <p>Searches product footprints around the selected mission-site reference coordinate. ODE uses east-positive longitudes in the query; verify each product's map-projection label and actual footprint.</p>
       <div className="archive-search-line"><select value={instrument} onChange={(e) => setInstrument(e.target.value)} aria-label="Instrument"><option>HiRISE</option><option>CTX</option><option>CRISM</option></select><button onClick={() => void runOdeSearch()} disabled={loading !== null}>{loading === 'ode' ? 'SEARCHING' : 'SEARCH ODE'}</button></div>
       {odeResult && <ArchiveResultView result={odeResult}/>}
       <a href="https://oderest.rsl.wustl.edu/ODE_REST_V2.1.6.pdf" target="_blank" rel="noreferrer">ODE REST MANUAL ↗</a>
