@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: marswalk-api
+    runtime: python
+    plan: free
+    rootDir: MARSCOPE-v0.3.1/backend
+    buildCommand: pip install -r requirements.txt && pip install -r requirements-geospatial.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: CORS_ORIGINS
+        sync: false
