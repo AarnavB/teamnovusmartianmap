@@ -21,7 +21,7 @@ Nominal resolution 20 m/pixel; elevation values in metres. Keep the original fil
 
 1. Install backend/requirements-geospatial.txt in addition to the backend requirements.
 2. Start the FastAPI backend.
-3. Upload the USGS GeoTIFF as multipart field file to POST /api/terrain/import-dem. Use width=192, height=192, and vertical_units=m for the first demo import.
+3. Upload the USGS GeoTIFF as multipart field file to POST /api/terrain/import-dem. The current frontend upload helper sends width=96, height=96, and vertical_units=m. This deliberately keeps the route grid manageable for the demo.
 4. Confirm GET /api/terrain reports NASA_OR_USER_SUPPLIED_GEOREFERENCED_DEM.
 5. Call GET /api/jezero/pois; check each POI's mapping status before offering it as a route endpoint.
 6. Use the returned {x,y} grid coordinates as the start and goal in the existing /api/routes request.
