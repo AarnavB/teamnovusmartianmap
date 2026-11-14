@@ -216,7 +216,7 @@ SITE_TERRAIN_PROFILES: dict[str, tuple[str, int, float, float]] = {
     "gusev": ("Gusev Crater", 20261116, -14.5692, 175.4729),
     "meridiani": ("Meridiani Planum", 20261117, -1.9462, 354.4734),
     "elysium": ("Elysium Planitia", 20261118, 4.5, 135.9),
-    "ares": ("Ares Vallis", 20261119, 326.747 and 19.095, 326.747),
+    "ares": ("Ares Vallis", 20261119, 19.095, 326.747),
     "chryse": ("Chryse Planitia", 20261120, 22.269, 312.049),
     "utopia": ("Utopia Planitia", 20261121, 47.668, 134.28),
     "vastitas": ("Vastitas Borealis", 20261122, 68.22, 234.25),
