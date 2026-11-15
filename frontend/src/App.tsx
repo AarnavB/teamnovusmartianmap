@@ -11,6 +11,8 @@ import DataProvenancePanel from './components/DataProvenancePanel';
 import ScientificTargetsPanel from './components/ScientificTargetsPanel';
 import RouteRobustnessPanel from './components/RouteRobustnessPanel';
 import AstronautHud from './components/AstronautHud';
+import MarscopeLanding from './components/MarscopeLanding';
+import GuidedTour from './components/GuidedTour';
 import { api } from './api';
 import { DEFAULT_MISSION_SITE_ID, MISSION_SITES } from './missionSites';
 import type { BenchmarkResult, JevPathfindingWeights, JevProvider, MissionEvent, MissionConstraintsPayload, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, Route, Target, TerrainData } from './types';
@@ -83,6 +85,10 @@ export default function App() {
   const [evaMode, setEvaMode] = useState(false);
   const [activeTab, setActiveTab] = useState<'planner' | 'jev' | 'science'>('planner');
   const [dataMenuOpen, setDataMenuOpen] = useState(false);
+  const [workspaceEntered, setWorkspaceEntered] = useState(false);
+  const [tourStep, setTourStep] = useState<number | null>(null);
+  const [evaRunning, setEvaRunning] = useState(false);
+  const dataModalCloseRef = useRef<HTMLButtonElement>(null);
   const [maxSlope, setMaxSlope] = useState(22);
   const [evaMinutes, setEvaMinutes] = useState(180);
   const [energyBudgetWh, setEnergyBudgetWh] = useState(180);
@@ -145,6 +151,56 @@ export default function App() {
   }), [maxSlope, evaMinutes, energyBudgetWh, oxygenBudget, oxygenRate, equipmentMass, restInterval]);
 
   useEffect(() => {
+    if (tourStep === null) return;
+    setDataMenuOpen(tourStep === 1);
+    setHudOpen(tourStep === 6);
+    if (tourStep === 4) setActiveTab('jev');
+    else if (tourStep === 5) setActiveTab('science');
+    else if (tourStep === 2 || tourStep === 3) setActiveTab('planner');
+  }, [tourStep]);
+
+  useEffect(() => {
+    if (!dataMenuOpen) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    const focusTimer = window.setTimeout(() => dataModalCloseRef.current?.focus(), 0);
+    const handleDialogKeys = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setDataMenuOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const dialog = document.getElementById('data-catalogue-dialog');
+      const focusable = dialog
+        ? Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter((element) => element.offsetParent !== null)
+        : [];
+      if (!focusable.length) {
+        event.preventDefault();
+        dialog?.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleDialogKeys);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener('keydown', handleDialogKeys);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [dataMenuOpen]);
+
+  useEffect(() => {
     let alive = true;
     Promise.all([api.dataCatalog(), api.health()])
       .then(([catalog, health]) => {
@@ -184,6 +240,7 @@ export default function App() {
     setDataMenuOpen(false);
     setConditionNotice('');
     setEvaProgressIndex(0);
+    setEvaRunning(false);
     setStart(INITIAL_START);
     setGoal(INITIAL_GOAL);
     setSelectedRoute('B');
@@ -560,7 +617,20 @@ export default function App() {
 
   useEffect(() => {
     setEvaProgressIndex(0);
+    setEvaRunning(false);
   }, [plan?.plan_id, selectedRoute]);
+
+  useEffect(() => {
+    if (!evaRunning || !evaMode || selectedPath.length < 2) return;
+    const timer = window.setInterval(() => {
+      setEvaProgressIndex((value) => Math.min(value + 1, selectedPath.length - 1));
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [evaRunning, evaMode, selectedPath.length]);
+
+  useEffect(() => {
+    if (evaRunning && selectedPath.length > 1 && evaIndex >= selectedPath.length - 1) setEvaRunning(false);
+  }, [evaRunning, evaIndex, selectedPath.length]);
 
   useEffect(() => {
     if (!evaMode) return;
@@ -573,10 +643,12 @@ export default function App() {
 
   if (loading) return <div className="boot-screen"><div className="boot-mark">M</div><div className="boot-title">MARSCOPE</div><div className="boot-sub">INITIALIZING PLANETARY SYSTEMS</div><div className="boot-bar"><span /></div></div>;
 
+  if (!workspaceEntered) return <MarscopeLanding apiStatus={status} terrainAvailable={Boolean(terrain && isVerifiedRealTerrain(terrain, selectedMissionSiteId))} onEnterWorkspace={() => setWorkspaceEntered(true)} onStartTour={() => { setWorkspaceEntered(true); setTourStep(0); }} />;
+
   return (
     <div className="app-shell min-h-screen bg-[#0b0d10] text-stone-100 antialiased">
       <header className="topbar sticky top-0 z-30 backdrop-blur-xl">
-        <div className="brand-block">
+        <div className="brand-block" data-tour-active={tourStep === 0 || undefined}>
           <div className="brand-mark">M</div>
           <div><div className="brand-name">MARSCOPE</div><div className="brand-tag">FROM ORBIT TO BOOTPRINT</div></div>
         </div>
@@ -585,7 +657,7 @@ export default function App() {
       </header>
 
       <main className="workspace grid min-h-0 gap-3 p-3 xl:grid-cols-[260px_minmax(0,1fr)_320px]">
-        <section className="left-rail min-w-0">
+        <section className="left-rail min-w-0" data-tour-active={tourStep === 3 || undefined}>
           <div className="rail-head"><span className="eyebrow">MISSION AREA</span><span className="live-chip">{terrainLoading ? 'LOADING' : terrain ? 'REAL DEM' : 'NO REAL DEM'}</span></div>
           <div className="location-card mission-site-card">
             <div className="planet-glyph">♂</div>
@@ -712,13 +784,13 @@ export default function App() {
               <button className={`eva-toggle ${evaMode ? 'on' : ''}`} onClick={() => setEvaMode(!evaMode)}>
                 <span className="eva-dot" /> EVA MODE
               </button>
-              <button className="hud-launch-button" onClick={() => setHudOpen(true)} disabled={!terrain}>
+              <button className="hud-launch-button" data-tour-active={tourStep === 6 || undefined} onClick={() => setHudOpen(true)} disabled={!terrain}>
                 ⌖ OPEN ASTRONAUT HUD
               </button>
             </div>
           </div>
 
-          <div className="terrain-frame">
+          <div className="terrain-frame" data-tour-active={tourStep === 2 || undefined}>
             {terrain && terrain.site_id === selectedMissionSiteId && (
               <TerrainScene
                 key={terrain.id}
@@ -1000,8 +1072,8 @@ export default function App() {
         <aside className="right-rail min-w-0">
           <div className="right-tabs">
             <button className={activeTab === 'planner' ? 'active' : ''} onClick={() => setActiveTab('planner')}>ANALYTICS</button>
-            <button className={activeTab === 'science' ? 'active' : ''} onClick={() => setActiveTab('science')}>SCIENCE</button>
-            <button className={activeTab === 'jev' ? 'active' : ''} onClick={() => setActiveTab('jev')}>JEV INTEL</button>
+            <button className={activeTab === 'science' ? 'active' : ''} data-tour-active={tourStep === 5 || undefined} onClick={() => setActiveTab('science')}>SCIENCE</button>
+            <button className={activeTab === 'jev' ? 'active' : ''} data-tour-active={tourStep === 4 || undefined} onClick={() => setActiveTab('jev')}>JEV INTEL</button>
             <button className={`data-launch ${dataMenuOpen ? 'active' : ''}`} onClick={() => setDataMenuOpen(true)} aria-haspopup="dialog" aria-expanded={dataMenuOpen}>DATA <span className="data-launch-glyph">↗</span></button>
           </div>
           {activeTab === 'planner' && selected && <div className="analytics-content">
@@ -1115,10 +1187,10 @@ export default function App() {
       </main>
       {dataMenuOpen && (
         <div className="data-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDataMenuOpen(false); }}>
-          <section className="data-modal-panel" role="dialog" aria-modal="true" aria-labelledby="data-modal-title">
+          <section id="data-catalogue-dialog" className="data-modal-panel" role="dialog" aria-modal="true" aria-labelledby="data-modal-title" aria-describedby="data-modal-description" tabIndex={-1} data-tour-active={tourStep === 1 || undefined}>
             <header className="data-modal-header">
-              <div><span className="eyebrow">MISSION DATA SYSTEMS / 03</span><h2 id="data-modal-title">Data catalogue & provenance</h2><p>Source discovery, terrain ingestion, layer lineage and offline map packages.</p></div>
-              <button className="data-modal-close" onClick={() => setDataMenuOpen(false)} aria-label="Close data catalogue">×</button>
+              <div><span className="eyebrow">MISSION DATA SYSTEMS / 03</span><h2 id="data-modal-title">Data catalogue & provenance</h2><p id="data-modal-description">Source discovery, terrain ingestion, layer lineage and offline map packages.</p></div>
+              <button ref={dataModalCloseRef} className="data-modal-close" onClick={() => setDataMenuOpen(false)} aria-label="Close data catalogue">×</button>
             </header>
             <div className="data-modal-meta"><span><i /> LIVE DATA INTERFACE</span><span>{datasets.length} CATALOGUED SOURCES</span><span>{terrain ? 'TERRAIN LOADED' : 'AWAITING TERRAIN'}</span></div>
             <div className="data-modal-body">
@@ -1158,7 +1230,32 @@ export default function App() {
         <AstronautHud
           mode={hudMode}
           onModeChange={setHudMode}
-          onClose={() => setHudOpen(false)}
+          onClose={() => { setEvaRunning(false); setHudOpen(false); }}
+          onStart={() => {
+            if (selectedPath.length < 2) return;
+            setEvaMode(true);
+            setEvaProgressIndex((value) => value >= selectedPath.length - 1 ? 0 : value);
+            setEvaRunning(true);
+          }}
+          onPause={() => setEvaRunning(false)}
+          onResume={() => {
+            if (selectedPath.length > 1 && evaIndex < selectedPath.length - 1) {
+              setEvaMode(true);
+              setEvaRunning(true);
+            }
+          }}
+          onAdvance={() => {
+            if (selectedPath.length > 1) {
+              setEvaMode(true);
+              setEvaRunning(false);
+              setEvaProgressIndex((value) => Math.min(value + 1, selectedPath.length - 1));
+            }
+          }}
+          onReset={() => { setEvaRunning(false); setEvaMode(true); setEvaProgressIndex(0); }}
+          isRunning={evaRunning}
+          canRun={Boolean(terrain && isVerifiedRealTerrain(terrain, selectedMissionSiteId) && selectedPath.length > 1)}
+          canAdvance={selectedPath.length > 1 && evaIndex < selectedPath.length - 1}
+          tourActive={tourStep === 6}
           siteName={selectedMissionSite.region}
           terrain={terrain}
           route={selected ?? null}
@@ -1169,11 +1266,13 @@ export default function App() {
           targets={scienceTargets}
           selectedTargetIds={selectedScienceTargetIds}
           maxSlope={maxSlope}
-          oxygenRemainingL={Math.max(0, oxygenBudget - elapsedOxygenL)}
-          energyRemainingWh={Math.max(0, energyBudgetWh - elapsedEnergyWh)}
-          evaMinutesRemaining={remainingEVAClockMin}
+          oxygenRemainingL={selected ? Math.max(0, oxygenBudget - elapsedOxygenL) : Number.NaN}
+          energyRemainingWh={selected ? Math.max(0, energyBudgetWh - elapsedEnergyWh) : Number.NaN}
+          evaMinutesRemaining={selected ? remainingEVAClockMin : Number.NaN}
+          warnings={terrainWarnings}
         />
       )}
+      {tourStep !== null && <GuidedTour step={tourStep} onChange={setTourStep} onClose={() => { setTourStep(null); setHudOpen(false); setDataMenuOpen(false); setEvaRunning(false); }} />}
       <footer className="app-footer flex items-center justify-between"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain ? 'IMPORTED MARS DEM · SOURCE HASHED' : 'NO REAL DEM LOADED'}</span><span>NOT FOR OPERATIONAL USE</span></footer>
     </div>
   );
