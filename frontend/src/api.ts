@@ -1,8 +1,17 @@
-import type { JezeroPoisResponse, ArchiveResult, BenchmarkResult, MissionConstraintsPayload, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, RegistryResponse, ScienceAnswer, TerrainData } from './types';
+import type { JevEvidenceAssessmentResponse, JevPathfindingWeights, JevProvider, JezeroPoisResponse, ArchiveResult, BenchmarkResult, MissionConstraintsPayload, MissionEvent, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, RegistryResponse, RouteReportResponse, ScienceAnswer, SensitivityResponse, TerrainData } from './types';
 
-const API_BASE = (import.meta.env.VITE_API_BASE || 'https://marswalk-api-1o9c.onrender.com').replace(/\/$/, '');
+const API_BASE = (import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/, '');
+
+function requireApiBase(path: string): void {
+  if (!API_BASE) {
+    throw new Error(
+      `Backend URL is not configured. Set VITE_API_BASE to the HTTPS URL of the MARSCOPE backend deployed from this fork, then redeploy the frontend. Requested endpoint: ${path}`
+    );
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  requireApiBase(path);
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
@@ -28,6 +37,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   jezeroPois: () => request<JezeroPoisResponse>('/api/jezero/pois'),
   health: () => request<{ status: string; release: string }>('/api/health'),
+  jevPathfindingWeights: (payload: { provider: JevProvider; apiKey: string; missionPrompt: string; site_id: string }) =>
+    request<JevPathfindingWeights>('/api/jev/pathfinding-weights', { method: 'POST', cache: 'no-store', body: JSON.stringify(payload) }),
+  jevEvidenceAssessment: (payload: { provider: JevProvider; apiKey: string; objective: string; hypothesis: string; evidence: Array<{ id: string; title: string; summary: string; url: string; mission?: string }> }) =>
+    request<JevEvidenceAssessmentResponse>('/api/jev/evidence-assessment', { method: 'POST', cache: 'no-store', body: JSON.stringify(payload) }),
   terrain: (siteId = 'jezero') => request<TerrainData>(`/api/terrain/${encodeURIComponent(siteId)}`),
   registry: () => request<RegistryResponse>('/api/registry'),
   dataCatalog: () => request<{ sources: OfficialSource[]; archives_connected: string[]; note: string }>('/api/data/catalog'),
@@ -57,8 +70,9 @@ export const api = {
     const form = new FormData(); form.append('file', file); form.append('layer', layer); form.append('value_min', String(min)); form.append('value_max', String(max)); form.append('source_unit', unit); form.append('band', String(band)); form.append('site_id', siteId);
     return request<{ terrain: TerrainData; provenance: Record<string, unknown>; notice: string }>('/api/terrain/import-layer', { method: 'POST', body: form });
   },
-  offlinePackage: async (planId?: string) => {
-    const response = await fetch(`${API_BASE}/api/offline/package`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan_id: planId }) });
+  offlinePackage: async (planId?: string, siteId = 'jezero') => {
+    requireApiBase('/api/offline/package');
+    const response = await fetch(`${API_BASE}/api/offline/package`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan_id: planId, site_id: siteId }) });
     if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(typeof payload.detail === 'string' ? payload.detail : `Package export failed (${response.status})`); }
     return response.blob();
   },
@@ -71,5 +85,24 @@ export const api = {
     request<ReplanResponse>('/api/replan', { method: 'POST', body: JSON.stringify({ plan_id: planId, obstacle }) }),
   updateCondition: (planId: string, cell: Point, kind: string, value: number) =>
     request<{ plan_id: string; path: Point[]; metrics: ReplanResponse['metrics']; update: Record<string, unknown>; expanded_during_repair: number; notice: string }>('/api/replan/condition', { method: 'POST', body: JSON.stringify({ plan_id: planId, cell, kind, value }) }),
+  sensitivity: (siteId: string, start: Point, goal: Point, constraints: MissionConstraintsPayload, values?: number[]) =>
+    request<SensitivityResponse>('/api/sensitivity', {
+      method: 'POST',
+      body: JSON.stringify({ site_id: siteId, start, goal, constraints, values: values ?? [14, 18, 22, 26, 30] }),
+    }),
+  planWaypoints: (siteId: string, start: Point, waypoints: Point[], goal: Point, constraints: MissionConstraintsPayload) =>
+    request<PlanResponse & { waypoints: Point[]; legs: Array<{ leg_index: number; from: Point; to: Point; distance_m: number; duration_min: number; energy_wh: number }> }>('/api/routes/waypoints', {
+      method: 'POST',
+      body: JSON.stringify({ site_id: siteId, start, waypoints, goal, constraints }),
+    }),
+  missionEvents: (planId: string) =>
+    request<{ plan_id: string; events: MissionEvent[] }>(`/api/missions/${encodeURIComponent(planId)}/events`),
+  recordMissionEvent: (planId: string, payload: { event_type: string; title: string; summary: string; data?: Record<string, unknown> }) =>
+    request<{ plan_id: string; event: MissionEvent; events: MissionEvent[] }>(`/api/missions/${encodeURIComponent(planId)}/events`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getRouteReport: (planId: string) =>
+    request<RouteReportResponse>(`/api/routes/${encodeURIComponent(planId)}/report`),
   reset: () => request<{ status: string }>('/api/reset', { method: 'POST' }),
 };

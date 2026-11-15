@@ -1,7 +1,7 @@
-"""Deterministic synthetic terrain used for algorithm/UI validation.
+"""Terrain data structures and explicitly isolated synthetic test fixtures.
 
-This module intentionally does NOT assign the generated grid real Mars
-coordinates or present its values as NASA observations.
+The production API does not generate terrain: it serves only imported,
+georeferenced Mars DEMs. generate_terrain remains available solely for tests.
 """
 from __future__ import annotations
 
@@ -19,14 +19,15 @@ class Terrain:
     elevation_m: list[list[float]]
     slope_deg: list[list[float]]
     roughness: list[list[float]]
-    regolith: list[list[float]]
-    temperature_c: list[list[float]]
-    environment_index: list[list[float]]
-    radiation_index: list[list[float]]
-    uncertainty: list[list[float]]
-    science_potential: list[list[float]]
+    regolith: list[list[float]] | None
+    temperature_c: list[list[float]] | None
+    environment_index: list[list[float]] | None
+    radiation_index: list[list[float]] | None
+    uncertainty: list[list[float]] | None
+    science_potential: list[list[float]] | None
     obstacle: list[list[bool]]
     targets: list[dict[str, Any]]
+    valid_mask: list[list[bool]] | None = None
     seed: int = 20261114
     available_layers: set[str] = field(default_factory=lambda: {"elevation", "slope", "roughness", "regolith", "temperature", "atmosphere", "radiation", "uncertainty", "science"})
     terrain_id: str = "mars-demo-synthetic-01"
@@ -50,31 +51,39 @@ class Terrain:
             not self.in_bounds(x, y)
             or self.obstacle[y][x]
             or self.slope_deg[y][x] > max_slope_deg
-            or ("temperature" in self.available_layers and self.temperature_c[y][x] > max_temperature_c)
+            or ("temperature" in self.available_layers and self.temperature_c is not None and self.temperature_c[y][x] > max_temperature_c)
         )
 
     def to_dict(self) -> dict[str, Any]:
+        if self.status == "SIMULATED_NOT_GEOREFERENCED":
+            display_name = (
+                "Synthetic Martian teaching tile"
+                if self.site_id == "demo"
+                else f"{self.site_name} — synthetic teaching grid"
+            )
+        else:
+            display_name = f"{self.site_name} — imported Mars DEM route grid"
         return {
             "id": self.terrain_id,
             "site_id": self.site_id,
             "site_name": self.site_name,
-            "name": f"{self.site_name} — synthetic demonstration grid" if self.status == "SIMULATED_NOT_GEOREFERENCED" else f"{self.site_name} — imported Mars DEM route grid",
+            "name": display_name,
             "status": self.status,
             "warning": self.warning,
             "width": self.width,
             "height": self.height,
             "cell_size_m": self.cell_m,
-            "seed": self.seed,
             "elevation_m": self.elevation_m,
             "slope_deg": self.slope_deg,
             "roughness": self.roughness,
-            "regolith": self.regolith,
-            "temperature_c": self.temperature_c,
-            "environment_index": self.environment_index,
-            "radiation_index": self.radiation_index,
-            "uncertainty": self.uncertainty,
-            "science_potential": self.science_potential,
+            "regolith": self.regolith if "regolith" in self.available_layers else None,
+            "temperature_c": self.temperature_c if "temperature" in self.available_layers else None,
+            "environment_index": self.environment_index if "atmosphere" in self.available_layers else None,
+            "radiation_index": self.radiation_index if "radiation" in self.available_layers else None,
+            "uncertainty": self.uncertainty if "uncertainty" in self.available_layers else None,
+            "science_potential": self.science_potential if "science" in self.available_layers else None,
             "obstacle": self.obstacle,
+            "valid_mask": self.valid_mask,
             "targets": self.targets,
             "cell_units": self.cell_units,
             "layer_provenance": self.layer_provenance,
@@ -210,29 +219,3 @@ def generate_terrain(
     )
 
 
-SITE_TERRAIN_PROFILES: dict[str, tuple[str, int, float, float]] = {
-    "jezero": ("Jezero Crater", 20261114, 18.44463, 77.45088),
-    "gale": ("Gale Crater", 20261115, -4.59, 137.44),
-    "gusev": ("Gusev Crater", 20261116, -14.5692, 175.4729),
-    "meridiani": ("Meridiani Planum", 20261117, -1.9462, 354.4734),
-    "elysium": ("Elysium Planitia", 20261118, 4.5, 135.9),
-    "ares": ("Ares Vallis", 20261119, 19.095, 326.747),
-    "chryse": ("Chryse Planitia", 20261120, 22.269, 312.049),
-    "utopia": ("Utopia Planitia", 20261121, 47.668, 134.28),
-    "vastitas": ("Vastitas Borealis", 20261122, 68.22, 234.25),
-}
-
-
-def generate_site_terrain(site_id: str) -> Terrain:
-    """Return a site-labelled synthetic grid, not a real geographic DEM."""
-    try:
-        site_name, seed, latitude, longitude_east = SITE_TERRAIN_PROFILES[site_id]
-    except KeyError as exc:
-        raise ValueError(f"Unknown mission site '{site_id}'.") from exc
-    return generate_terrain(
-        seed=seed,
-        site_id=site_id,
-        site_name=site_name,
-        reference_latitude=latitude,
-        reference_longitude_east=longitude_east,
-    )

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { Point, Route, TerrainData } from '../types';
+import type { Point, Route, Target, TerrainData } from '../types';
 
 const VERTICAL_EXAGGERATION = 5;
 
@@ -15,10 +15,19 @@ type Props = {
   obstacles: Point[];
   layer: Layer;
   viewMode: '3D' | '2D';
-  pickMode: 'start' | 'goal' | null;
+  pickMode: 'start' | 'goal' | 'waypoint' | null;
   evaPosition: Point | null;
   returnPath: Point[];
   onPick: (point: Point) => void;
+  hazardOverlay?: boolean;
+  maxSlopeDeg?: number;
+  waypoints?: Point[];
+  previewRoute?: { path: Point[]; label: string } | null;
+  deviationPoint?: Point | null;
+  scientificTargets?: Target[];
+  selectedScientificTargetIds?: string[];
+  selectedCell?: Point | null;
+  onInspect?: (point: Point) => void;
 };
 
 type Latest = Omit<Props, 'terrain'>;
@@ -26,15 +35,18 @@ type Latest = Omit<Props, 'terrain'>;
 function layerValue(terrain: TerrainData, layer: Layer, x: number, y: number): number {
   if (layer === 'slope') return Math.min(terrain.slope_deg[y][x] / 32, 1);
   if (layer === 'roughness') return terrain.roughness[y][x];
-  if (layer === 'regolith') return terrain.regolith[y][x];
-  if (layer === 'temperature') return Math.max(0, Math.min(1, (terrain.temperature_c[y][x] + 150) / 200));
-  if (layer === 'environment') return terrain.environment_index[y][x];
-  if (layer === 'radiation') return terrain.radiation_index[y][x];
-  if (layer === 'uncertainty') return terrain.uncertainty[y][x];
-  if (layer === 'science') return terrain.science_potential[y][x];
+  if (layer === 'regolith') return terrain.regolith?.[y]?.[x] ?? 0;
+  if (layer === 'temperature') {
+    const value = terrain.temperature_c?.[y]?.[x];
+    return typeof value === 'number' ? Math.max(0, Math.min(1, (value + 150) / 200)) : 0;
+  }
+  if (layer === 'environment') return terrain.environment_index?.[y]?.[x] ?? 0;
+  if (layer === 'radiation') return terrain.radiation_index?.[y]?.[x] ?? 0;
+  if (layer === 'uncertainty') return terrain.uncertainty?.[y]?.[x] ?? 0;
+  if (layer === 'science') return terrain.science_potential?.[y]?.[x] ?? 0;
   const values = terrain.elevation_m.flat();
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const min = values.reduce((a, b) => Math.min(a, b));
+  const max = values.reduce((a, b) => Math.max(a, b));
   return (terrain.elevation_m[y][x] - min) / Math.max(0.001, max - min);
 }
 
@@ -70,12 +82,14 @@ export default function TerrainScene(props: Props) {
     goal: props.goal, obstacles: props.obstacles, layer: props.layer,
     viewMode: props.viewMode, pickMode: props.pickMode, evaPosition: props.evaPosition,
     returnPath: props.returnPath, onPick: props.onPick,
+    selectedCell: props.selectedCell, onInspect: props.onInspect,
   });
   latestRef.current = {
     routes: props.routes, selectedRoute: props.selectedRoute, start: props.start,
     goal: props.goal, obstacles: props.obstacles, layer: props.layer,
     viewMode: props.viewMode, pickMode: props.pickMode, evaPosition: props.evaPosition,
     returnPath: props.returnPath, onPick: props.onPick,
+    selectedCell: props.selectedCell, onInspect: props.onInspect,
   };
 
   useEffect(() => {
@@ -107,7 +121,7 @@ export default function TerrainScene(props: Props) {
     const colors: number[] = [];
     const indices: number[] = [];
     const values = props.terrain.elevation_m.flat();
-    const min = Math.min(...values);
+    const min = values.reduce((a, b) => Math.min(a, b));
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const z = ((props.terrain.elevation_m[y][x] - min) / Math.max(props.terrain.cell_size_m, 1e-6)) * VERTICAL_EXAGGERATION;
@@ -117,13 +131,19 @@ export default function TerrainScene(props: Props) {
         colors.push(color.r, color.g, color.b);
       }
     }
+    const validMask = props.terrain.valid_mask;
     for (let y = 0; y < height - 1; y++) {
       for (let x = 0; x < width - 1; x++) {
         const a = y * width + x;
         const b = a + 1;
         const c = a + width;
         const d = c + 1;
-        indices.push(a, c, b, b, c, d);
+        const aValid = validMask?.[y]?.[x] !== false;
+        const bValid = validMask?.[y]?.[x + 1] !== false;
+        const cValid = validMask?.[y + 1]?.[x] !== false;
+        const dValid = validMask?.[y + 1]?.[x + 1] !== false;
+        if (aValid && cValid && bValid) indices.push(a, c, b);
+        if (bValid && cValid && dValid) indices.push(b, c, d);
       }
     }
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -152,20 +172,42 @@ export default function TerrainScene(props: Props) {
     controls.maxPolarAngle = Math.PI * 0.48;
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
-    const handleClick = (event: MouseEvent) => {
+    let pointerStart: { x: number; y: number; id: number } | null = null;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      pointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId };
+    };
+    const handlePointerUp = (event: PointerEvent) => {
+      const startPoint = pointerStart;
+      pointerStart = null;
+      if (!startPoint || startPoint.id !== event.pointerId) return;
+      // OrbitControls owns drags. Only a short, stationary press is a cell pick.
+      if (Math.hypot(event.clientX - startPoint.x, event.clientY - startPoint.y) > 6) return;
       const state = latestRef.current;
-      if (!state.pickMode) return;
       const rect = renderer.domElement.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
-      const hit = raycaster.intersectObject(mesh, false)[0];
-      if (!hit) return;
-      const gx = Math.round(hit.point.x + width / 2);
-      const gy = Math.round(hit.point.y + height / 2);
-      if (gx >= 0 && gx < width && gy >= 0 && gy < height) state.onPick({ x: gx, y: gy });
+
+      // Prefer the actual DEM surface. If a NoData hole has no triangles, fall
+      // back to the map's XY footprint so the invalid grid sample remains inspectable.
+      const surfaceHit = raycaster.intersectObject(mesh, false)[0]?.point.clone();
+      const mapHit = surfaceHit ?? raycaster.ray.intersectPlane(
+        new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
+        new THREE.Vector3(),
+      );
+      if (!mapHit) return;
+      const localHit = mesh.worldToLocal(mapHit.clone());
+      const gx = Math.round(localHit.x + width / 2);
+      const gy = Math.round(localHit.y + height / 2);
+      if (gx < 0 || gx >= width || gy < 0 || gy >= height) return;
+      const selected = { x: gx, y: gy };
+      if (state.pickMode) state.onPick(selected);
+      else state.onInspect?.(selected);
     };
-    renderer.domElement.addEventListener('click', handleClick);
+    renderer.domElement.addEventListener('pointerdown', handlePointerDown);
+    renderer.domElement.addEventListener('pointerup', handlePointerUp);
 
     sceneRef.current = scene;
     cameraRef.current = camera;
@@ -192,7 +234,8 @@ export default function TerrainScene(props: Props) {
     return () => {
       cancelAnimationFrame(frame);
       window.removeEventListener('resize', resize);
-      renderer.domElement.removeEventListener('click', handleClick);
+      renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
+      renderer.domElement.removeEventListener('pointerup', handlePointerUp);
       controls.dispose();
       geometry.dispose();
       material.dispose();
@@ -211,15 +254,35 @@ export default function TerrainScene(props: Props) {
     const mesh = meshRef.current;
     if (!mesh) return;
     const colors = mesh.geometry.getAttribute('color') as THREE.BufferAttribute;
+    const limit = props.maxSlopeDeg ?? 22;
+
     for (let y = 0; y < props.terrain.height; y++) {
       for (let x = 0; x < props.terrain.width; x++) {
-        const color = makeColor(layerValue(props.terrain, props.layer, x, y), props.layer);
+        let color: THREE.Color;
+        if (props.hazardOverlay) {
+          const isBlocked = props.terrain.obstacle[y][x] || props.terrain.valid_mask?.[y]?.[x] === false;
+          const slope = props.terrain.slope_deg[y][x];
+          if (isBlocked) {
+            color = new THREE.Color('#191f21');
+          } else if (slope > limit) {
+            color = new THREE.Color('#d85e45'); // hazard steep slope
+          } else if (slope >= limit * 0.8) {
+            color = new THREE.Color('#d8a35c'); // warning caution slope
+          } else {
+            color = new THREE.Color('#2e4a42'); // safe traversable slope
+          }
+        } else {
+          color = makeColor(layerValue(props.terrain, props.layer, x, y), props.layer);
+        }
         colors.setXYZ(y * props.terrain.width + x, color.r, color.g, color.b);
       }
     }
     colors.needsUpdate = true;
-    mesh.geometry.computeVertexNormals();
-  }, [props.terrain, props.layer]);
+    // computeVertexNormals() is intentionally NOT called here.
+    // Normals depend only on vertex positions (geometry), not on vertex colours.
+    // Positions are set once at terrain load; calling this on every layer change
+    // wastes ~1 ms per frame and produces no visible difference.
+  }, [props.terrain, props.layer, props.hazardOverlay, props.maxSlopeDeg]);
 
   useEffect(() => {
     const overlay = overlayRef.current;
@@ -235,7 +298,7 @@ export default function TerrainScene(props: Props) {
     }
     const { width, height } = props.terrain;
     const values = props.terrain.elevation_m.flat();
-    const min = Math.min(...values);
+    const min = values.reduce((a, b) => Math.min(a, b));
     const zAt = (p: Point) => ((props.terrain.elevation_m[p.y][p.x] - min) / Math.max(props.terrain.cell_size_m, 1e-6)) * VERTICAL_EXAGGERATION + 1.2;
     const world = (p: Point) => new THREE.Vector3(p.x - width / 2, p.y - height / 2, zAt(p));
 
@@ -271,9 +334,71 @@ export default function TerrainScene(props: Props) {
     };
     addSphere(props.start, '#f4eee3', 1.3);
     addSphere(props.goal, '#f2a45b', 1.6);
-    for (const target of props.terrain.targets) addSphere(target, '#d5c779', 0.75, 2.0);
+    const scienceTargets = props.scientificTargets ?? props.terrain.targets;
+    for (const target of scienceTargets) {
+      const isSelected = (props.selectedScientificTargetIds ?? []).includes(target.id);
+      addSphere(target, isSelected ? '#f4e6a1' : '#71d2c5', isSelected ? 1.55 : 1.05, 3.8);
+    }
     for (const obstacle of props.obstacles) addSphere(obstacle, '#e25f4e', 1.05, 2.6);
     if (props.evaPosition) addSphere(props.evaPosition, '#70e0c0', 1.45, 4.0);
+
+    // Waypoints
+    if (props.waypoints) {
+      props.waypoints.forEach((wp) => {
+        addSphere(wp, '#45caf0', 1.35, 3.2);
+      });
+    }
+
+    // Sensitivity preview route
+    if (props.previewRoute && props.previewRoute.path.length > 1) {
+      const previewPoints = props.previewRoute.path.map((p) => world(p));
+      const previewGeom = new THREE.BufferGeometry().setFromPoints(previewPoints);
+      const previewMat = new THREE.LineDashedMaterial({
+        color: '#ffffff',
+        dashSize: 1.5,
+        gapSize: 0.8,
+        transparent: true,
+        opacity: 0.9,
+      });
+      const previewLine = new THREE.Line(previewGeom, previewMat);
+      previewLine.computeLineDistances();
+      previewLine.position.z += 1.0;
+      overlay.add(previewLine);
+    }
+
+    // Deviation point locator from RouteExplainability
+    if (props.deviationPoint) {
+      addSphere(props.deviationPoint, '#f7df72', 1.7, 4.5);
+    }
+
+    // Persistent selected-cell reticle. The marker is tied to the same DEM
+    // vertex/grid coordinate used by the inspector readout.
+    if (props.selectedCell
+      && props.selectedCell.x >= 0 && props.selectedCell.x < width
+      && props.selectedCell.y >= 0 && props.selectedCell.y < height) {
+      const selectedPosition = world(props.selectedCell);
+      const ringGeometry = new THREE.RingGeometry(0.42, 0.55, 40);
+      const ringMaterial = new THREE.MeshBasicMaterial({
+        color: '#8fe8e6', transparent: true, opacity: 0.95,
+        side: THREE.DoubleSide, depthTest: false,
+      });
+      const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+      ring.position.copy(selectedPosition);
+      ring.position.z += 2.6;
+      ring.renderOrder = 20;
+      overlay.add(ring);
+
+      const stemGeometry = new THREE.BufferGeometry().setFromPoints([
+        selectedPosition.clone().setZ(selectedPosition.z + 2.8),
+        selectedPosition.clone().setZ(selectedPosition.z + 7.2),
+      ]);
+      const stemMaterial = new THREE.LineBasicMaterial({
+        color: '#b7f5e9', transparent: true, opacity: 0.82, depthTest: false,
+      });
+      const stem = new THREE.Line(stemGeometry, stemMaterial);
+      stem.renderOrder = 21;
+      overlay.add(stem);
+    }
 
     const camera = cameraRef.current;
     const controls = controlsRef.current;
@@ -290,7 +415,23 @@ export default function TerrainScene(props: Props) {
       controls.target.set(0, 0, 2);
       controls.update();
     }
-  }, [props.routes, props.selectedRoute, props.start, props.goal, props.obstacles, props.viewMode, props.terrain, props.evaPosition, props.returnPath]);
+  }, [
+    props.routes,
+    props.selectedRoute,
+    props.start,
+    props.goal,
+    props.obstacles,
+    props.viewMode,
+    props.terrain,
+    props.evaPosition,
+    props.returnPath,
+    props.waypoints,
+    props.previewRoute,
+    props.deviationPoint,
+    props.scientificTargets,
+    props.selectedScientificTargetIds,
+    props.selectedCell,
+  ]);
 
-  return <div className="terrain-canvas" ref={mountRef} aria-label="Interactive synthetic 3D terrain. Drag to orbit, scroll to zoom, click to set route points." />;
+  return <div className="terrain-canvas" ref={mountRef} aria-label="Interactive 3D terrain model derived from an imported Mars DEM. Drag to orbit, scroll to zoom, click to set route points." />;
 }
