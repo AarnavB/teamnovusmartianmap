@@ -307,12 +307,16 @@ def import_aligned_layer(path: Path, terrain: Any, *, layer: str, value_min: flo
         field = "temperature_c"
         valid = physically_valid
     else:
+        # Missing cells are made no-go rather than filled with a plausible
+        # score. Their placeholder storage value is never available to search.
         values = np.zeros_like(target, dtype=np.float32)
         values[valid] = np.clip((target[valid] - value_min) / (value_max - value_min), 0.0, 1.0)
-        values[~valid] = 0.65
+        terrain.obstacle = (np.asarray(terrain.obstacle, dtype=bool) | ~valid).tolist()
         field = NORMALIZED_LAYER_FIELDS[layer]
     setattr(terrain, field, values.tolist())
-    terrain.uncertainty = np.maximum(np.asarray(terrain.uncertainty), np.where(valid, 0.0, 0.85)).tolist()
+    # Do not synthesize an uncertainty layer when the source DEM had none.
+    # If uncertainty was already loaded, preserve it; if this import is the
+    # uncertainty layer itself, the newly imported values are now available.
     if layer == "temperature_c":
         terrain.available_layers.add("temperature")
     elif layer == "environment_index":
@@ -324,7 +328,7 @@ def import_aligned_layer(path: Path, terrain: Any, *, layer: str, value_min: flo
     elif layer == "regolith":
         terrain.available_layers.add("regolith")
     metadata["coverage_valid_fraction"] = round(valid_fraction, 6)
-    metadata["missing_cells_policy"] = "temperature NoData/out-of-range cells are marked as no-go; normalized layers receive a 0.65 placeholder and elevated uncertainty, with coverage fraction retained"
+    metadata["missing_cells_policy"] = "NoData/out-of-range cells are marked as no-go; no guessed hazard, science or uncertainty values are introduced"
     layer_meta = terrain.coordinate_info.setdefault("imported_layer_provenance", {})
     layer_meta[layer] = metadata
     terrain.layer_provenance += f" Additional layer {layer} imported from {path.name}; see coordinate_info.imported_layer_provenance.{layer}."
