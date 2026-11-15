@@ -12,8 +12,12 @@ type Props = {
 
 type MetricStatus = 'IMPORTED' | 'DERIVED' | 'SIMULATED' | 'NOT AVAILABLE';
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 function numericCell(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  return isFiniteNumber(value) ? value : null;
 }
 
 function MetricCard({
@@ -65,8 +69,8 @@ export default function ScientificTerrainInspector({
   const temperatureRaw = inBounds ? terrain.temperature_c?.[y]?.[x] : undefined;
   const temperature: number | null = inBounds && isValidSample && available.has('temperature') ? numericCell(temperatureRaw) : null;
   const obstacleFlag = inBounds ? terrain.obstacle?.[y]?.[x] : undefined;
-  const blockedBySlope = slope != null && slope > maxSlopeDeg;
-  const blockedByTemperature = temperature != null && temperature > -35;
+  const blockedBySlope = isFiniteNumber(slope) && slope > maxSlopeDeg;
+  const blockedByTemperature = isFiniteNumber(temperature) && temperature > -35;
   const blocked = obstacleFlag === true || blockedBySlope || blockedByTemperature || isNoData === true;
   const plannerStatus = !inBounds ? 'OUT OF GRID'
     : isNoData === true ? 'BLOCKED · NO DATA'
@@ -130,31 +134,31 @@ export default function ScientificTerrainInspector({
         <div className="inspector-metric-grid">
           <MetricCard
             label="ELEVATION"
-            value={elevation != null ? elevation.toFixed(2) : 'N/A'}
-            unit={elevation != null ? 'm' : undefined}
-            status={elevation != null ? sourceStatus : 'NOT AVAILABLE'}
-            detail={elevation != null ? 'Imported source-raster elevation' : isNoData ? 'Cell is outside valid DEM coverage' : 'No verified valid elevation sample'}
+            value={isFiniteNumber(elevation) ? elevation.toFixed(2) : 'N/A'}
+            unit={isFiniteNumber(elevation) ? 'm' : undefined}
+            status={isFiniteNumber(elevation) ? sourceStatus : 'NOT AVAILABLE'}
+            detail={isFiniteNumber(elevation) ? 'Imported source-raster elevation' : isNoData ? 'Cell is outside valid DEM coverage' : 'No verified valid elevation sample'}
           />
           <MetricCard
             label="SLOPE"
-            value={slope != null ? slope.toFixed(2) : 'N/A'}
-            unit={slope != null ? '°' : undefined}
-            status={slope != null ? 'DERIVED' : 'NOT AVAILABLE'}
-            detail={slope != null ? 'Gradient-derived from the imported DEM' : 'No valid slope sample at this cell'}
+            value={isFiniteNumber(slope) ? slope.toFixed(2) : 'N/A'}
+            unit={isFiniteNumber(slope) ? '°' : undefined}
+            status={isFiniteNumber(slope) ? 'DERIVED' : 'NOT AVAILABLE'}
+            detail={isFiniteNumber(slope) ? 'Gradient-derived from the imported DEM' : 'No valid slope sample at this cell'}
           />
           <MetricCard
             label="ROUGHNESS"
-            value={roughness != null ? roughness.toFixed(3) : 'N/A'}
-            unit={roughness != null ? 'index' : undefined}
-            status={roughness != null ? 'DERIVED' : 'NOT AVAILABLE'}
-            detail={roughness != null ? '3 × 3 local standard deviation, normalized 0–1' : 'No valid roughness sample at this cell'}
+            value={isFiniteNumber(roughness) ? roughness.toFixed(3) : 'N/A'}
+            unit={isFiniteNumber(roughness) ? 'index' : undefined}
+            status={isFiniteNumber(roughness) ? 'DERIVED' : 'NOT AVAILABLE'}
+            detail={isFiniteNumber(roughness) ? '3 × 3 local standard deviation, normalized 0–1' : 'No valid roughness sample at this cell'}
           />
           <MetricCard
             label="SCIENCE POTENTIAL"
-            value={scienceValue != null ? scienceValue.toFixed(3) : 'N/A'}
-            unit={scienceValue != null ? 'index' : undefined}
-            status={scienceValue != null ? (isSimulated ? 'SIMULATED' : 'IMPORTED') : 'NOT AVAILABLE'}
-            detail={scienceValue != null ? 'Spatial science-priority layer value' : 'No science-priority raster registered for this DEM'}
+            value={isFiniteNumber(scienceValue) ? scienceValue.toFixed(3) : 'N/A'}
+            unit={isFiniteNumber(scienceValue) ? 'index' : undefined}
+            status={isFiniteNumber(scienceValue) ? (isSimulated ? 'SIMULATED' : 'IMPORTED') : 'NOT AVAILABLE'}
+            detail={isFiniteNumber(scienceValue) ? 'Spatial science-priority layer value' : 'No science-priority raster registered for this DEM'}
           />
         </div>
         <div className="inspector-classification">
