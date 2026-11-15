@@ -59,21 +59,72 @@ def last_successful_evaluation() -> dict[str, Any]:
 
 
 async def probe_jev_reachability() -> dict[str, Any]:
-    """On-demand probe of the JEV service public /health endpoint.
+    """Check both HTTP reachability and the identity/configuration of JEV.
 
-    Called only by /api/jev/status, not before every JEV request. Short
-    timeout, never sends the service token.
+    This is an on-demand diagnostic only. It never sends the shared service
+    token or a provider key to the public health endpoint.
     """
     config = jev_service_config()
     if not config["configured"]:
-        return {"configured": False, "reachable": False, "reason": "not_configured"}
+        return {
+            "configured": False,
+            "reachable": False,
+            "service_configured": False,
+            "service_ready": False,
+            "reason": "not_configured",
+        }
+
     service_url = config["service_url"]
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(3.0, connect=2.0)) as client:
-            response = await client.get(f"{service_url}/health", headers={"Cache-Control": "no-store"})
-        return {"configured": True, "reachable": 200 <= response.status_code < 300, "status_code": response.status_code}
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
+            response = await client.get(
+                f"{service_url}/health",
+                headers={"Cache-Control": "no-store"},
+            )
+
+        if not response.is_success:
+            return {
+                "configured": True,
+                "reachable": False,
+                "service_configured": False,
+                "service_ready": False,
+                "status_code": response.status_code,
+                "reason": "health_check_failed",
+            }
+
+        try:
+            health = response.json()
+        except ValueError:
+            health = None
+
+        if not isinstance(health, dict) or health.get("service") != "marscope-jev-decision-service" or health.get("status") != "ok":
+            return {
+                "configured": True,
+                "reachable": False,
+                "service_configured": False,
+                "service_ready": False,
+                "status_code": response.status_code,
+                "reason": "unexpected_health_response",
+            }
+
+        service_configured = health.get("configured") is True
+        return {
+            "configured": True,
+            "reachable": True,
+            "service_configured": service_configured,
+            "service_ready": service_configured,
+            "service": health.get("service"),
+            "status_code": response.status_code,
+            **({} if service_configured else {"reason": "service_token_not_configured"}),
+        }
     except httpx.HTTPError:
-        return {"configured": True, "reachable": False, "reason": "transport_error"}
+        return {
+            "configured": True,
+            "reachable": False,
+            "service_configured": False,
+            "service_ready": False,
+            "reason": "transport_error",
+        }
 
 
 def _record_success(result: dict[str, Any], endpoint: str, provider: str, correlation_id: str) -> None:
@@ -89,18 +140,33 @@ def _record_success(result: dict[str, Any], endpoint: str, provider: str, correl
 
 
 def _classify_error_response(response: httpx.Response, data: Any) -> tuple[int, str, bool]:
-    """Map a non-success JEV response to (http_status, safe_detail, retryable)."""
-    if isinstance(data, dict) and isinstance(data.get("detail"), str) and data["detail"].strip():
-        status = response.status_code if 400 <= response.status_code < 500 else 502
-        return status, data["detail"], False
+    """Map a non-success JEV response to (http_status, safe_detail, retryable).
+
+    The decision service returns JSON for both provider failures and its own
+    errors. Handle transient server statuses before the generic JSON-detail
+    branch so a useful detail message does not accidentally disable retries.
+    """
     status = response.status_code
-    if status in (502, 503, 504):
-        return (503, "JEV decision service is starting up or unreachable. The static balanced route remains available.", True)
+    detail = (
+        data.get("detail", "").strip()
+        if isinstance(data, dict) and isinstance(data.get("detail"), str)
+        else ""
+    )
+
+    if status in (502, 503, 504, 529):
+        fallback = "JEV decision service or provider is temporarily unavailable. The static balanced route remains available."
+        return (504 if status == 504 else 503, detail or fallback, True)
+
+    if detail:
+        if 400 <= status < 500:
+            return status, detail, False
+        return 502, detail, False
+
     if status == 404:
         return (502, "JEV_SERVICE_URL appears misconfigured (the service returned a non-JEV response). The static balanced route remains available.", False)
     if 400 <= status < 500:
         return (status, "JEV decision service rejected the request with an unexpected response. The static balanced route remains available.", False)
-    return (502, "JEV decision service returned a non-JSON response. The static balanced route remains available.", True)
+    return (502, "JEV decision service returned an unexpected response. The static balanced route remains available.", False)
 
 
 async def _request_jev_service(endpoint: str, payload: dict[str, Any], required_result_field: str) -> dict[str, Any]:
