@@ -9,6 +9,14 @@ from typing import Any
 import numpy as np
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _is_mars_ellipsoid(semi_major_m: float, semi_minor_m: float) -> bool:
     mars_equatorial = abs(semi_major_m - 3396190.0) <= 15000.0 or abs(semi_major_m - 3396000.0) <= 15000.0
     mars_polar = abs(semi_minor_m - 3376200.0) <= 20000.0
@@ -154,7 +162,7 @@ def dem_to_terrain(path: Path, *, width: int = 96, height: int = 96, vertical_un
     elevation_display = np.where(valid, z, display_fill)
     slope_display = np.where(np.isfinite(slope_raw), slope_raw, 0.0)
     roughness_display = np.where(np.isfinite(roughness_norm), roughness_norm, 0.0)
-    file_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    file_hash = _sha256_file(path)
 
     grid = Terrain(
         width=width,
