@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* Keep Tailwind's utility layer intentionally small: the dashboard's visual
+   language is defined in modern-ui.css, while existing feature styles remain
+   available to their original components. */
+@theme {
+  --color-mars-950: #090b0d;
+  --color-mars-900: #101417;
+  --color-mars-850: #151b1f;
+  --color-mars-800: #1c2428;
+  --color-mars-line: #2a3438;
+  --color-mars-muted: #8a9699;
+  --color-mars-ember: #f07849;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, SFMono-Regular, monospace;
+}
