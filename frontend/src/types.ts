@@ -37,16 +37,16 @@ export type TerrainData = {
   width: number;
   height: number;
   cell_size_m: number;
-  seed: number;
+  seed?: number;
   elevation_m: number[][];
   slope_deg: number[][];
   roughness: number[][];
-  regolith: number[][];
-  temperature_c: number[][];
-  environment_index: number[][];
-  radiation_index: number[][];
-  uncertainty: number[][];
-  science_potential: number[][];
+  regolith: number[][] | null;
+  temperature_c: number[][] | null;
+  environment_index: number[][] | null;
+  radiation_index: number[][] | null;
+  uncertainty: number[][] | null;
+  science_potential: number[][] | null;
   obstacle: boolean[][];
   targets: Target[];
   cell_units: string;
@@ -62,7 +62,7 @@ export type RouteMetrics = {
   terrain_risk_pct: number;
   environment_risk_pct: number | null;
   radiation_index_pct: number | null;
-  uncertainty_pct: number;
+  uncertainty_pct: number | null;
   scientific_value_pct: number | null;
   return_feasible: boolean;
   return_time_estimate_min: number;
@@ -86,6 +86,10 @@ export type Route = {
   search: {
     expanded_nodes: number;
     generated_labels: number;
+    runtime_ms?: number;
+    edge_cache_hits?: number;
+    edge_cache_misses?: number;
+    max_labels_per_cell?: number;
     pareto_labels_at_goal: number;
     objective_vector: Record<string, number>;
     approximate_frontier: boolean;
@@ -96,13 +100,13 @@ export type Route = {
 
 export type PlanResponse = {
   plan_id: string;
+  site_id?: string;
+  planning_runtime_ms?: number;
   terrain_id: string;
   start: Point;
   goal: Point;
   constraints: MissionConstraintsPayload;
   routes: Route[];
-  incremental_balanced_path: Point[];
-  incremental_algorithm: string;
   scientific_note: string;
 };
 
