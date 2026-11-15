@@ -1,4 +1,4 @@
-import type { JezeroPoisResponse, ArchiveResult, BenchmarkResult, MissionConstraintsPayload, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, RegistryResponse, ScienceAnswer, TerrainData } from './types';
+import type { JezeroPoisResponse, ArchiveResult, BenchmarkResult, MissionConstraintsPayload, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, RegistryResponse, RouteReportResponse, ScienceAnswer, SensitivityResponse, TerrainData } from './types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/, '');
 
@@ -81,5 +81,17 @@ export const api = {
     request<ReplanResponse>('/api/replan', { method: 'POST', body: JSON.stringify({ plan_id: planId, obstacle }) }),
   updateCondition: (planId: string, cell: Point, kind: string, value: number) =>
     request<{ plan_id: string; path: Point[]; metrics: ReplanResponse['metrics']; update: Record<string, unknown>; expanded_during_repair: number; notice: string }>('/api/replan/condition', { method: 'POST', body: JSON.stringify({ plan_id: planId, cell, kind, value }) }),
+  sensitivity: (siteId: string, start: Point, goal: Point, constraints: MissionConstraintsPayload, values?: number[]) =>
+    request<SensitivityResponse>('/api/sensitivity', {
+      method: 'POST',
+      body: JSON.stringify({ site_id: siteId, start, goal, constraints, values: values ?? [14, 18, 22, 26, 30] }),
+    }),
+  planWaypoints: (siteId: string, start: Point, waypoints: Point[], goal: Point, constraints: MissionConstraintsPayload) =>
+    request<PlanResponse & { waypoints: Point[]; legs: Array<{ leg_index: number; from: Point; to: Point; distance_m: number; duration_min: number; energy_wh: number }> }>('/api/routes/waypoints', {
+      method: 'POST',
+      body: JSON.stringify({ site_id: siteId, start, waypoints, goal, constraints }),
+    }),
+  getRouteReport: (planId: string) =>
+    request<RouteReportResponse>(`/api/routes/${encodeURIComponent(planId)}/report`),
   reset: () => request<{ status: string }>('/api/reset', { method: 'POST' }),
 };

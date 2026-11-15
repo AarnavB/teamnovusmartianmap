@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import TerrainScene from './components/TerrainScene';
 import DataExplorer from './components/DataExplorer';
 import ScienceAssistant from './components/ScienceAssistant';
+import RouteProfileChart from './components/RouteProfileChart';
+import RouteExplainability from './components/RouteExplainability';
+import RouteComparisonTable from './components/RouteComparisonTable';
+import SensitivityAnalysis from './components/SensitivityAnalysis';
 import { api } from './api';
 import { DEFAULT_MISSION_SITE_ID, MISSION_SITES } from './missionSites';
 import type { BenchmarkResult, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, Route, TerrainData } from './types';
@@ -49,6 +53,7 @@ function gridHeading(from: Point, to: Point) {
   const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
   return `${directions[Math.round(degrees / 45) % 8]} ${Math.round(degrees).toString().padStart(3, '0')}° GRID`;
 }
+
 export default function App() {
   const [terrain, setTerrain] = useState<TerrainData | null>(null);
   const [selectedMissionSiteId, setSelectedMissionSiteId] = useState(DEFAULT_MISSION_SITE_ID);
@@ -59,9 +64,10 @@ export default function App() {
   const [selectedRoute, setSelectedRoute] = useState('B');
   const [start, setStart] = useState<Point>(INITIAL_START);
   const [goal, setGoal] = useState<Point>(INITIAL_GOAL);
+  const [waypoints, setWaypoints] = useState<Point[]>([]);
   const [layer, setLayer] = useState<Layer>('elevation');
   const [viewMode, setViewMode] = useState<'3D' | '2D'>('3D');
-  const [pickMode, setPickMode] = useState<'start' | 'goal' | null>(null);
+  const [pickMode, setPickMode] = useState<'start' | 'goal' | 'waypoint' | null>(null);
   const [evaMode, setEvaMode] = useState(false);
   const [activeTab, setActiveTab] = useState<'planner' | 'science' | 'data'>('planner');
   const [maxSlope, setMaxSlope] = useState(22);
@@ -87,7 +93,17 @@ export default function App() {
   const [status, setStatus] = useState('CONNECTING');
   const [evaProgressIndex, setEvaProgressIndex] = useState(0);
   const [offlineStatus, setOfflineStatus] = useState<OfflineStatus | null>(null);
+
+  // High-value scientific visualization & UX states
+  const [hazardOverlay, setHazardOverlay] = useState(false);
+  const [showSensitivity, setShowSensitivity] = useState(false);
+  const [showComparison, setShowComparison] = useState(false);
+  const [previewRoute, setPreviewRoute] = useState<{ path: Point[]; label: string } | null>(null);
+  const [deviationPoint, setDeviationPoint] = useState<Point | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+
   const selectedMissionSite = MISSION_SITES.find((site) => site.id === selectedMissionSiteId) ?? MISSION_SITES[0];
+  const hasAtmosphere = (terrain?.available_layers ?? []).includes('atmosphere');
 
   useEffect(() => {
     let alive = true;
@@ -114,6 +130,7 @@ export default function App() {
     setTerrain(null);
     setPlan(null);
     setRoutes([]);
+    setWaypoints([]);
     setPlanning(false);
     setReplanning(false);
     setBenchmarking(false);
@@ -128,6 +145,11 @@ export default function App() {
     setLayer('elevation');
     setPickMode(null);
     setEvaMode(false);
+    setHazardOverlay(false);
+    setShowSensitivity(false);
+    setShowComparison(false);
+    setPreviewRoute(null);
+    setDeviationPoint(null);
     setError('');
 
     api.terrain(siteId)
@@ -148,15 +170,16 @@ export default function App() {
     return () => { alive = false; };
   }, [selectedMissionSiteId]);
 
-  const runPlan = useCallback(async (newStart = start, newGoal = goal) => {
+  const runPlan = useCallback(async (newStart = start, newGoal = goal, currentWaypoints = waypoints) => {
     const siteId = selectedMissionSiteId;
     if (!terrain || !isVerifiedRealTerrain(terrain, siteId) || activeMissionSiteIdRef.current !== siteId) return;
     setPlanning(true);
     setError('');
     setReplanResult(null);
     setAddedObstacles([]);
+    setPreviewRoute(null);
     try {
-      const result = await api.plan(siteId, newStart, newGoal, {
+      const constraints = {
         max_slope_deg: maxSlope,
         max_temperature_c: -35,
         eva_limit_minutes: evaMinutes,
@@ -176,11 +199,19 @@ export default function App() {
           radiation: riskAversion,
           uncertainty: uncertaintyAversion,
         },
-      });
+      };
+
+      let result: PlanResponse;
+      if (currentWaypoints.length > 0) {
+        result = await api.planWaypoints(siteId, newStart, currentWaypoints, newGoal, constraints);
+      } else {
+        result = await api.plan(siteId, newStart, newGoal, constraints);
+      }
+
       if (activeMissionSiteIdRef.current !== siteId) return;
       setPlan(result);
       setRoutes(result.routes);
-      setSelectedRoute('B');
+      setSelectedRoute(result.routes[0]?.id ?? 'B');
       setEvaProgressIndex(0);
     } catch (err) {
       if (activeMissionSiteIdRef.current === siteId) {
@@ -189,7 +220,7 @@ export default function App() {
     } finally {
       setPlanning(false);
     }
-  }, [selectedMissionSiteId, terrain, start, goal, maxSlope, evaMinutes, oxygenBudget, oxygenRate, restInterval, equipmentMass, energyBudgetWh, sciencePriority, riskAversion, uncertaintyAversion]);
+  }, [selectedMissionSiteId, terrain, start, goal, waypoints, maxSlope, evaMinutes, oxygenBudget, oxygenRate, restInterval, equipmentMass, energyBudgetWh, sciencePriority, riskAversion, uncertaintyAversion]);
 
   useEffect(() => {
     if (terrain && terrain.site_id === selectedMissionSiteId && !terrainLoading && !plan && !planning && !error) void runPlan();
@@ -203,9 +234,61 @@ export default function App() {
   const handlePick = useCallback((point: Point) => {
     if (!terrain) return;
     if (pickMode === 'start') setStart(point);
-    if (pickMode === 'goal') setGoal(point);
+    else if (pickMode === 'goal') setGoal(point);
+    else if (pickMode === 'waypoint') {
+      if (waypoints.length < 5) {
+        const nextWp = [...waypoints, point];
+        setWaypoints(nextWp);
+        void runPlan(start, goal, nextWp);
+      }
+    }
     setPickMode(null);
-  }, [pickMode, terrain]);
+  }, [pickMode, terrain, waypoints, start, goal, runPlan]);
+
+  // Start and Goal traversability validation
+  const startSlope = terrain && terrain.slope_deg[start.y]?.[start.x];
+  const startBlocked = terrain && (terrain.obstacle[start.y]?.[start.x] || terrain.valid_mask?.[start.y]?.[start.x] === false);
+  const startSteep = startSlope != null && startSlope > maxSlope;
+
+  const goalSlope = terrain && terrain.slope_deg[goal.y]?.[goal.x];
+  const goalBlocked = terrain && (terrain.obstacle[goal.y]?.[goal.x] || terrain.valid_mask?.[goal.y]?.[goal.x] === false);
+  const goalSteep = goalSlope != null && goalSlope > maxSlope;
+
+  const nudgeToTraversable = (pointType: 'start' | 'goal') => {
+    if (!terrain) return;
+    const target = pointType === 'start' ? start : goal;
+    let bestDist = Infinity;
+    let bestPt: Point | null = null;
+    for (let r = 1; r <= 8; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const nx = target.x + dx;
+          const ny = target.y + dy;
+          if (nx >= 0 && nx < terrain.width && ny >= 0 && ny < terrain.height) {
+            const isBlocked = terrain.obstacle[ny][nx] || terrain.valid_mask?.[ny]?.[nx] === false;
+            const slope = terrain.slope_deg[ny][nx];
+            if (!isBlocked && slope <= maxSlope) {
+              const d = Math.hypot(dx, dy);
+              if (d < bestDist) {
+                bestDist = d;
+                bestPt = { x: nx, y: ny };
+              }
+            }
+          }
+        }
+      }
+      if (bestPt) break;
+    }
+    if (bestPt) {
+      if (pointType === 'start') {
+        setStart(bestPt);
+        void runPlan(bestPt, goal, waypoints);
+      } else {
+        setGoal(bestPt);
+        void runPlan(start, bestPt, waypoints);
+      }
+    }
+  };
 
   const runBenchmark = async () => {
     setBenchmarking(true);
@@ -232,7 +315,11 @@ export default function App() {
 
   const injectConditionUpdate = async () => {
     if (!plan) return;
-    const selected = routes.find((route) => route.profile === 'balanced') ?? routes[1];
+    if (!hasAtmosphere) {
+      setError('Cannot simulate environmental condition update: no spatial atmospheric/environment layer is loaded for this mission site. Import a georeferenced raster via DATA panel.');
+      return;
+    }
+    const selected = routes.find((route) => route.profile === 'balanced') ?? routes[1] ?? routes[0];
     if (!selected || selected.path.length < 5) return;
     const point = selected.path[Math.floor(selected.path.length * 0.58)];
     setReplanning(true); setError(''); setConditionNotice('');
@@ -247,7 +334,7 @@ export default function App() {
 
   const injectObstacle = async () => {
     if (!plan) return;
-    const selected = routes.find((route) => route.id === selectedRoute) ?? routes[1];
+    const selected = routes.find((route) => route.id === selectedRoute) ?? routes[1] ?? routes[0];
     if (!selected || selected.path.length < 5) return;
     const middle = selected.path[Math.floor(selected.path.length * 0.52)];
     const candidates = [middle, ...selected.path.slice(Math.max(1, Math.floor(selected.path.length * 0.52) - 3), Math.floor(selected.path.length * 0.52) + 4)];
@@ -276,6 +363,30 @@ export default function App() {
       setError(err instanceof Error ? err.message : 'Adaptive replanning failed');
     } finally {
       setReplanning(false);
+    }
+  };
+
+  const downloadReport = async (format: 'markdown' | 'json') => {
+    if (!plan) return;
+    setReportLoading(true);
+    try {
+      const res = await api.getRouteReport(plan.plan_id);
+      const content = format === 'markdown' ? res.report_markdown : JSON.stringify(res.report_json, null, 2);
+      const mime = format === 'markdown' ? 'text/markdown' : 'application/json';
+      const ext = format === 'markdown' ? 'md' : 'json';
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `marscope-${selectedMissionSiteId}-report-${plan.plan_id.slice(0, 8)}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not generate report');
+    } finally {
+      setReportLoading(false);
     }
   };
 
@@ -370,13 +481,62 @@ export default function App() {
             <a href={selectedMissionSite.coordinateSourceUrl} target="_blank" rel="noreferrer">{selectedMissionSite.coordinateSource} ↗</a>
           </div>
           <p className="mission-site-warning">{terrain?.site_id === selectedMissionSiteId ? terrain.warning : terrainLoading ? `Fetching or loading the official ${selectedMissionSite.region} DEM…` : error || 'Terrain data is unavailable for this mission site.'}</p>
+
           <div className="section-kicker">MISSION PLANNING</div>
           <div className="field-stack">
             <div className="field-label"><span>01 / START POINT</span><button className={`tiny-action ${pickMode === 'start' ? 'active' : ''}`} onClick={() => setPickMode(pickMode === 'start' ? null : 'start')}>PICK ON MAP</button></div>
             <div className="coord-card"><span className="point-symbol start-symbol">A</span><div><b>{pointText(start)}</b><small>Grid reference · imported DEM</small></div></div>
+            {(startBlocked || startSteep) && (
+              <div className="start-goal-alert">
+                <span>⚠ Start point is on {startBlocked ? 'an untraversable/obstacle cell' : `steep terrain (${startSlope?.toFixed(1)}° > ${maxSlope}°)`}.</span>
+                <button onClick={() => nudgeToTraversable('start')}>Nudge to nearest traversable cell</button>
+              </div>
+            )}
+
+            {/* Waypoints Section */}
+            <div className="waypoint-box">
+              <div className="field-label">
+                <span>INTERMEDIATE TARGETS ({waypoints.length}/5)</span>
+                {waypoints.length < 5 && (
+                  <button className={`tiny-action ${pickMode === 'waypoint' ? 'active' : ''}`} onClick={() => setPickMode(pickMode === 'waypoint' ? null : 'waypoint')}>
+                    {pickMode === 'waypoint' ? 'CLICK TERRAIN' : '+ ADD WAYPOINT'}
+                  </button>
+                )}
+              </div>
+              {waypoints.length > 0 && (
+                <div className="waypoint-list">
+                  {waypoints.map((wp, idx) => (
+                    <div key={`wp-${idx}`} className="waypoint-item">
+                      <span>W{idx + 1}: {pointText(wp)}</span>
+                      <button
+                        onClick={() => {
+                          const nextWp = waypoints.filter((_, i) => i !== idx);
+                          setWaypoints(nextWp);
+                          void runPlan(start, goal, nextWp);
+                        }}
+                        title="Remove waypoint"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button className="tiny-action" style={{ alignSelf: 'flex-start', marginTop: 4 }} onClick={() => { setWaypoints([]); void runPlan(start, goal, []); }}>
+                    CLEAR ALL WAYPOINTS
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="field-label"><span>02 / DESTINATION</span><button className={`tiny-action ${pickMode === 'goal' ? 'active' : ''}`} onClick={() => setPickMode(pickMode === 'goal' ? null : 'goal')}>PICK ON MAP</button></div>
             <div className="coord-card"><span className="point-symbol goal-symbol">B</span><div><b>{pointText(goal)}</b><small>Grid reference · imported DEM</small></div></div>
-            {pickMode && <div className="pick-hint">Click a location on the terrain to set the {pickMode === 'start' ? 'start point' : 'destination'}.</div>}
+            {(goalBlocked || goalSteep) && (
+              <div className="start-goal-alert">
+                <span>⚠ Destination is on {goalBlocked ? 'an untraversable/obstacle cell' : `steep terrain (${goalSlope?.toFixed(1)}° > ${maxSlope}°)`}.</span>
+                <button onClick={() => nudgeToTraversable('goal')}>Nudge to nearest traversable cell</button>
+              </div>
+            )}
+
+            {pickMode && <div className="pick-hint">Click a location on the terrain to set the {pickMode === 'start' ? 'start point' : pickMode === 'goal' ? 'destination' : 'waypoint target'}.</div>}
           </div>
 
           <div className="field-stack mission-params">
@@ -397,7 +557,7 @@ export default function App() {
           <button className="primary-button" onClick={() => void runPlan()} disabled={planning || terrainLoading || !terrain || terrain.site_id !== selectedMissionSiteId}>
             {planning ? <><span className="spinner" /> COMPUTING ROUTES</> : <><span>⌁</span> GENERATE ROUTE OPTIONS</>}
           </button>
-          <button className="ghost-button" onClick={() => { const a = INITIAL_START; const b = INITIAL_GOAL; setStart(a); setGoal(b); void runPlan(a, b); }}>RESET MISSION GEOMETRY</button>
+          <button className="ghost-button" onClick={() => { const a = INITIAL_START; const b = INITIAL_GOAL; setStart(a); setGoal(b); setWaypoints([]); void runPlan(a, b, []); }}>RESET MISSION GEOMETRY</button>
 
           <div className="rail-footnote"><span className="warning-icon">!</span><p>Research prototype only. Never use these paths as operational astronaut guidance.</p></div>
         </section>
@@ -405,24 +565,97 @@ export default function App() {
         <section className="center-column">
           <div className="view-header">
             <div><div className="eyebrow">SURFACE RECONNAISSANCE</div><h1>{selectedMissionSite.region} <span>/</span> {selectedMissionSite.feature}</h1></div>
-            <div className="view-actions"><div className="segmented"><button className={viewMode === '3D' ? 'selected' : ''} onClick={() => setViewMode('3D')}>3D TERRAIN</button><button className={viewMode === '2D' ? 'selected' : ''} onClick={() => setViewMode('2D')}>2D MAP</button></div><button className={`eva-toggle ${evaMode ? 'on' : ''}`} onClick={() => setEvaMode(!evaMode)}><span className="eva-dot" /> EVA MODE</button></div>
+            <div className="view-actions">
+              <div className="segmented">
+                <button className={viewMode === '3D' ? 'selected' : ''} onClick={() => setViewMode('3D')}>3D TERRAIN</button>
+                <button className={viewMode === '2D' ? 'selected' : ''} onClick={() => setViewMode('2D')}>2D MAP</button>
+              </div>
+              <button
+                className={`hazard-toggle ${hazardOverlay ? 'on' : ''}`}
+                onClick={() => setHazardOverlay(!hazardOverlay)}
+                title="Overlay slope hazard: Red = Exceeds Slope Limit, Amber = Near Limit, Dark = Blocked/NoData"
+              >
+                ⚠ HAZARD OVERLAY {hazardOverlay ? `(> ${maxSlope}°)` : ''}
+              </button>
+              <button className={`eva-toggle ${evaMode ? 'on' : ''}`} onClick={() => setEvaMode(!evaMode)}>
+                <span className="eva-dot" /> EVA MODE
+              </button>
+            </div>
           </div>
 
           <div className="terrain-frame">
-            {terrain && terrain.site_id === selectedMissionSiteId && <TerrainScene key={terrain.id} terrain={terrain} routes={routes} selectedRoute={selectedRoute} start={start} goal={goal} obstacles={addedObstacles} layer={layer} viewMode={viewMode} pickMode={pickMode} evaPosition={evaMode ? evaPosition : null} returnPath={evaMode ? returnPath : EMPTY_PATH} onPick={handlePick} />}
+            {terrain && terrain.site_id === selectedMissionSiteId && (
+              <TerrainScene
+                key={terrain.id}
+                terrain={terrain}
+                routes={routes}
+                selectedRoute={selectedRoute}
+                start={start}
+                goal={goal}
+                obstacles={addedObstacles}
+                layer={layer}
+                viewMode={viewMode}
+                pickMode={pickMode}
+                evaPosition={evaMode ? evaPosition : null}
+                returnPath={evaMode ? returnPath : EMPTY_PATH}
+                onPick={handlePick}
+                hazardOverlay={hazardOverlay}
+                maxSlopeDeg={maxSlope}
+                waypoints={waypoints}
+                previewRoute={previewRoute}
+                deviationPoint={deviationPoint}
+              />
+            )}
             {terrainLoading && <div className="terrain-loading-state"><span className="spinner" /> LOADING {selectedMissionSite.region.toUpperCase()} TERRAIN</div>}
             {!terrain && !terrainLoading && <div className="terrain-loading-state terrain-error-state"><b>TERRAIN UNAVAILABLE</b><span>{error || `Could not load a terrain grid for ${selectedMissionSite.region}.`}</span></div>}
             <div className="scene-top-left"><span className="scene-tag"><i /> TERRAIN MODEL</span><span className="scene-tag muted">{'IMPORTED / GEOREFERENCED DEM'}</span></div>
             <div className="scene-top-right"><span className="compass">N</span><span className="compass-line" /></div>
             <div className="scene-bottom-left"><span>GRID CELL <b>{terrain?.cell_size_m?.toFixed(1) ?? '8.0'} m</b></span><span className="scene-vertical-note">VERTICAL EXAGGERATION <b>5×</b></span></div>
             <div className="scene-bottom-right"><span className="view-caption">{viewMode === '3D' ? 'OBLIQUE VIEW' : 'PLAN VIEW'}</span><span className="zoom-hint">DRAG TO ORBIT · SCROLL TO ZOOM</span></div>
-            {pickMode && <div className="map-pick-overlay">SELECT {pickMode === 'start' ? 'START POINT' : 'DESTINATION'} ON THE TERRAIN</div>}
+            {pickMode && <div className="map-pick-overlay">SELECT {pickMode === 'start' ? 'START POINT' : pickMode === 'goal' ? 'DESTINATION' : 'WAYPOINT TARGET'} ON THE TERRAIN</div>}
           </div>
 
+          {hazardOverlay && (
+            <div className="hazard-banner-active">
+              <span>⚠ HAZARD OVERLAY ACTIVE: RED = SLOPE &gt; {maxSlope}°, AMBER = SLOPE &ge; {(maxSlope * 0.8).toFixed(1)}°, DARK = OBSTACLE / NODATA</span>
+              <button className="tiny-action" onClick={() => setHazardOverlay(false)}>DISMISS</button>
+            </div>
+          )}
+
+          {/* Layer strip with full explanations for unavailable layers */}
           <div className="layer-strip">
-            <div className="layer-title"><span className="eyebrow">MAP LAYERS</span><span className="layer-count">{layerNames.filter((entry) => { const key: Record<Layer, string> = { elevation: 'elevation', slope: 'slope', roughness: 'roughness', regolith: 'regolith', temperature: 'temperature', environment: 'atmosphere', radiation: 'radiation', uncertainty: 'uncertainty', science: 'science' }; return (terrain?.available_layers ?? []).includes(key[entry.id]); }).length} AVAILABLE</span></div>
-            <div className="layer-buttons">{layerNames.filter((entry) => { const key: Record<Layer, string> = { elevation: 'elevation', slope: 'slope', roughness: 'roughness', regolith: 'regolith', temperature: 'temperature', environment: 'atmosphere', radiation: 'radiation', uncertainty: 'uncertainty', science: 'science' }; return (terrain?.available_layers ?? []).includes(key[entry.id]); }).map((entry) => <button key={entry.id} className={layer === entry.id ? 'layer-button active' : 'layer-button'} onClick={() => setLayer(entry.id)}><span className={`layer-swatch swatch-${entry.id}`} />{entry.name}</button>)}</div>
-            <div className="layer-metadata"><span>SOURCE <b>{'Imported planetary DEM'}</b></span><span>DATE <b>{'Source product metadata'}</b></span><span>GRID SPACING <b>{terrain?.cell_size_m ?? 8} m</b></span><span>LAYERS <b>{(terrain?.available_layers ?? []).join(', ') || 'Unspecified'}</b></span></div>
+            <div className="layer-title"><span className="eyebrow">MAP LAYERS</span><span className="layer-count">{layerNames.filter((entry) => { const key: Record<Layer, string> = { elevation: 'elevation', slope: 'slope', roughness: 'roughness', regolith: 'regolith', temperature: 'temperature', environment: 'atmosphere', radiation: 'radiation', uncertainty: 'uncertainty', science: 'science' }; return (terrain?.available_layers ?? []).includes(key[entry.id]); }).length} / {layerNames.length} AVAILABLE</span></div>
+            <div className="layer-buttons">
+              {layerNames.map((entry) => {
+                const key: Record<Layer, string> = {
+                  elevation: 'elevation', slope: 'slope', roughness: 'roughness',
+                  regolith: 'regolith', temperature: 'temperature', environment: 'atmosphere',
+                  radiation: 'radiation', uncertainty: 'uncertainty', science: 'science',
+                };
+                const isAvailable = (terrain?.available_layers ?? []).includes(key[entry.id]);
+                const tooltipText = isAvailable
+                  ? `${entry.name} (${entry.unit})`
+                  : `${entry.name} is unavailable. No continuous georeferenced raster is published for this site. Import via DATA panel.`;
+
+                return (
+                  <button
+                    key={entry.id}
+                    className={!isAvailable ? 'layer-button disabled' : layer === entry.id ? 'layer-button active' : 'layer-button'}
+                    onClick={() => isAvailable && setLayer(entry.id)}
+                    disabled={!isAvailable}
+                    title={tooltipText}
+                  >
+                    <span className={`layer-swatch swatch-${entry.id}`} />
+                    {entry.name} {!isAvailable ? '(NO DATA)' : ''}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="layer-metadata">
+              <span>SOURCE <b>{'Catalogued official Mars DEM'}</b></span>
+              <span>GRID SPACING <b>{terrain?.cell_size_m?.toFixed(1) ?? 8} m</b></span>
+              <span>AVAILABLE LAYERS <b>{(terrain?.available_layers ?? []).join(', ') || 'Unspecified'}</b></span>
+            </div>
           </div>
 
           {evaMode ? (
@@ -434,14 +667,45 @@ export default function App() {
                 <button onClick={() => setEvaProgressIndex(0)} disabled={evaIndex === 0}>RESET TO START</button>
               </div>
               <div className="eva-grid">
+                {/* Visual Gauges */}
+                <div className="eva-stat">
+                  <div className="eva-gauge-container">
+                    <div className="eva-gauge-header"><span>EVA TIME CONSUMPTION</span><b>{elapsedOutboundMin.toFixed(1)} / {evaMinutes} min</b></div>
+                    <div className="eva-gauge-track">
+                      <div className="eva-reserve-line" title="25% Reserve Threshold" />
+                      <div className={`eva-gauge-fill ${progressFraction > 0.85 ? 'red' : progressFraction > 0.65 ? 'amber' : 'green'}`} style={{ width: `${Math.min(100, (elapsedOutboundMin / Math.max(1, evaMinutes)) * 100)}%` }} />
+                    </div>
+                    <small>{remainingEVAClockMin.toFixed(1)} min modeled clock before reserve</small>
+                  </div>
+                </div>
+
+                <div className="eva-stat">
+                  <div className="eva-gauge-container">
+                    <div className="eva-gauge-header"><span>ENERGY CONSUMPTION</span><b>{elapsedEnergyWh.toFixed(1)} / {energyBudgetWh} Wh</b></div>
+                    <div className="eva-gauge-track">
+                      <div className="eva-reserve-line" title="25% Reserve Threshold" />
+                      <div className={`eva-gauge-fill ${elapsedEnergyWh / energyBudgetWh > 0.85 ? 'red' : elapsedEnergyWh / energyBudgetWh > 0.65 ? 'amber' : 'green'}`} style={{ width: `${Math.min(100, (elapsedEnergyWh / Math.max(1, energyBudgetWh)) * 100)}%` }} />
+                    </div>
+                    <small>{Math.max(0, energyBudgetWh - elapsedEnergyWh).toFixed(1)} Wh remaining</small>
+                  </div>
+                </div>
+
+                <div className="eva-stat">
+                  <div className="eva-gauge-container">
+                    <div className="eva-gauge-header"><span>OXYGEN RESERVES</span><b>{elapsedOxygenL.toFixed(1)} / {oxygenBudget} L</b></div>
+                    <div className="eva-gauge-track">
+                      <div className="eva-reserve-line" title="25% Reserve Threshold" />
+                      <div className={`eva-gauge-fill ${elapsedOxygenL / oxygenBudget > 0.85 ? 'red' : elapsedOxygenL / oxygenBudget > 0.65 ? 'amber' : 'green'}`} style={{ width: `${Math.min(100, (elapsedOxygenL / Math.max(1, oxygenBudget)) * 100)}%` }} />
+                    </div>
+                    <small>{Math.max(0, oxygenBudget - elapsedOxygenL).toFixed(1)} L remaining</small>
+                  </div>
+                </div>
+
+                <div className="eva-stat"><span>RETURN TRACE TO BASE</span><strong>{returnDistanceM.toFixed(1)} m</strong><small>{pointText(evaPosition)} → {pointText(start)} · dashed on map</small></div>
                 <div className="eva-stat"><span>CURRENT POSITION</span><strong>{pointText(evaPosition)}</strong><small>{'Imported DEM grid coordinate'}</small></div>
                 <div className="eva-stat"><span>NEXT ROUTE WAYPOINT</span><strong>{nextWaypoint ? pointText(nextWaypoint) : 'DESTINATION REACHED'}</strong><small>{nextWaypoint ? `${(Math.hypot(nextWaypoint.x - evaPosition.x, nextWaypoint.y - evaPosition.y) * cellSizeM).toFixed(1)} m · ${gridHeading(evaPosition, nextWaypoint)}` : 'No forward waypoint remains'}</small></div>
                 <div className="eva-stat"><span>REMAINING OUTBOUND</span><strong>{remainingDistanceM.toFixed(1)} m</strong><small>{remainingOutboundMin.toFixed(1)} min model estimate</small></div>
-                <div className="eva-stat"><span>RETURN TRACE TO BASE</span><strong>{returnDistanceM.toFixed(1)} m</strong><small>{pointText(evaPosition)} → {pointText(start)} · dashed on map</small></div>
-                <div className="eva-stat"><span>ESTIMATED EVA CLOCK AVAILABLE</span><strong>{remainingEVAClockMin.toFixed(1)} min</strong><small>{elapsedOutboundMin.toFixed(1)} min modeled outbound elapsed</small></div>
                 <div className="eva-stat"><span>TIME TO DESTINATION + RETURN</span><strong>{remainingPlanMin.toFixed(1)} min</strong><small>Remaining outbound + full return leg estimate</small></div>
-                <div className="eva-stat"><span>ENERGY REMAINING FOR PLAN</span><strong>{Math.max(0, energyBudgetWh - elapsedEnergyWh).toFixed(1)} Wh</strong><small>{remainingPlanEnergyWh.toFixed(1)} Wh estimated to destination + return</small></div>
-                <div className="eva-stat"><span>OXYGEN REMAINING FOR PLAN</span><strong>{Math.max(0, oxygenBudget - elapsedOxygenL).toFixed(1)} L</strong><small>{remainingPlanOxygenL.toFixed(1)} L estimated to destination + return</small></div>
                 <div className="eva-stat"><span>PLAN RETURN RESERVE CHECK</span><strong className={selected?.metrics.return_feasible ? 'good' : 'bad'}>{selected?.metrics.return_feasible ? 'WITHIN MODEL BUDGET' : 'REVIEW MODEL LIMITS'}</strong><small>Computed at route-planning time; not a live safety certification</small></div>
                 <div className="eva-stat"><span>OFFLINE REVIEW CACHE</span><strong>{offlineStatus ? `${offlineStatus.package_count} PACKAGES` : 'STATUS UNAVAILABLE'}</strong><small>{offlineStatus ? `${offlineStatus.tile_count} rendered tiles cached` : 'Open the DATA panel to inspect cache status'}</small></div>
               </div>
@@ -454,14 +718,108 @@ export default function App() {
             </div>
           ) : (
             <div className="route-section">
-              <div className="section-heading"><div><span className="eyebrow">PATHFINDING ENGINE</span><h2>Route alternatives <span className="count-pill">{routes.length}</span></h2>{plan?.planning_runtime_ms !== undefined && <small>Planner compute: {plan.planning_runtime_ms.toFixed(1)} ms</small>}</div><div className="route-actions"><button className="text-action" onClick={() => void runBenchmark()} disabled={!terrain || benchmarking || planning}>{benchmarking ? 'COMPARING…' : 'COMPARE BASELINES'}</button></div></div>
+              <div className="section-heading">
+                <div>
+                  <span className="eyebrow">PATHFINDING ENGINE</span>
+                  <h2>Route alternatives <span className="count-pill">{routes.length}</span></h2>
+                  {plan?.planning_runtime_ms !== undefined && <small>Planner compute: {plan.planning_runtime_ms.toFixed(1)} ms</small>}
+                </div>
+                <div className="route-actions">
+                  <button className={`text-action ${showComparison ? 'active' : ''}`} onClick={() => setShowComparison(!showComparison)}>
+                    {showComparison ? 'HIDE COMPARISON' : 'COMPARE PROFILES'}
+                  </button>
+                  <button className={`text-action ${showSensitivity ? 'active' : ''}`} onClick={() => setShowSensitivity(!showSensitivity)}>
+                    {showSensitivity ? 'CLOSE SENSITIVITY' : 'SENSITIVITY ANALYSIS'}
+                  </button>
+                  <button className="text-action" onClick={() => void injectObstacle()} disabled={!plan || replanning || planning} title="Inject an obstacle on the route and trigger LPA* incremental replan">
+                    {replanning ? 'REPLANNING…' : '+ SIMULATE OBSTACLE'}
+                  </button>
+                  <button
+                    className="text-action"
+                    onClick={() => void injectConditionUpdate()}
+                    disabled={!plan || !hasAtmosphere || replanning || planning}
+                    title={!hasAtmosphere ? 'Atmospheric layer unavailable for this site. Import georeferenced raster via DATA panel.' : 'Simulate an environmental condition update and trigger LPA* repair'}
+                  >
+                    ~ SIMULATE CONDITION {!hasAtmosphere ? '(NO DATA)' : ''}
+                  </button>
+                  <button className="text-action" onClick={() => void runBenchmark()} disabled={!terrain || benchmarking || planning}>
+                    {benchmarking ? 'COMPARING…' : 'COMPARE BASELINES'}
+                  </button>
+                </div>
+              </div>
+
+              {conditionNotice && (
+                <div className="repair-banner">
+                  <span className="repair-icon">✓</span>
+                  <div><b>ADAPTIVE REPLANNING</b><small>{conditionNotice}</small></div>
+                  <button onClick={() => setConditionNotice('')}>×</button>
+                </div>
+              )}
+              {replanResult && (
+                <div className="repair-banner">
+                  <span className="repair-icon">⚠</span>
+                  <div><b>OBSTACLE INJECTED & REPAIRED</b><small>{replanResult.notice} Repaired {replanResult.expanded_during_repair} nodes via LPA*.</small></div>
+                  <button onClick={() => setReplanResult(null)}>×</button>
+                </div>
+              )}
+
+              {/* Sensitivity Analysis Drawer / Modal */}
+              {showSensitivity && (
+                <SensitivityAnalysis
+                  siteId={selectedMissionSiteId}
+                  start={start}
+                  goal={goal}
+                  currentMaxSlope={maxSlope}
+                  constraints={{
+                    max_slope_deg: maxSlope,
+                    eva_limit_minutes: evaMinutes,
+                    energy_budget_wh: energyBudgetWh,
+                    oxygen_budget_l: oxygenBudget,
+                    oxygen_consumption_lpm: oxygenRate,
+                  }}
+                  onPreviewPath={(path, label) => setPreviewRoute({ path, label })}
+                  onClose={() => { setShowSensitivity(false); setPreviewRoute(null); }}
+                />
+              )}
+
+              {/* Multi-Route Comparison Table */}
+              {showComparison && (
+                <RouteComparisonTable
+                  routes={routes}
+                  selectedRouteId={selectedRoute}
+                  onSelectRoute={setSelectedRoute}
+                />
+              )}
+
               <div className="route-cards">
                 {routes.map((route) => <button key={route.id} className={`route-card ${selectedRoute === route.id ? 'selected' : ''}`} onClick={() => setSelectedRoute(route.id)}>
                   <div className="route-card-top"><span className={`route-letter route-${route.id}`}>{route.id}</span><span className="route-status">{route.is_pareto ? 'PARETO' : 'ALTERNATIVE'}</span></div>
                   <strong>{route.name}</strong><p>{route.summary}</p>
-                  <div className="route-metrics-mini"><span><b>{route.metrics.distance_m.toFixed(0)}</b> m</span><span><b>{route.metrics.duration_min.toFixed(1)}</b> min</span><span><b>{route.metrics.terrain_risk_pct.toFixed(0)}</b> risk</span></div>
+                  <div className="route-metrics-mini"><span><b>{route.metrics.distance_m.toFixed(0)}</b> m</span><span><b>{route.metrics.duration_min.toFixed(1)}</b> min</span><span><b>{route.metrics.terrain_risk_pct?.toFixed(0) ?? 'N/A'}</b> risk</span></div>
                 </button>)}
               </div>
+
+              {/* Elevation & Slope Profile Chart */}
+              {terrain && selected && (
+                <RouteProfileChart
+                  terrain={terrain}
+                  route={selected}
+                  maxSlopeDeg={maxSlope}
+                />
+              )}
+
+              {/* Route Decision Explainability Panel */}
+              {terrain && selected && (
+                <RouteExplainability
+                  terrain={terrain}
+                  route={selected}
+                  start={start}
+                  goal={goal}
+                  maxSlopeDeg={maxSlope}
+                  onSelectDeviation={setDeviationPoint}
+                />
+              )}
+
               {benchmarkResults.length > 0 && <div className="benchmark-strip">
                 <div className="benchmark-head"><b>BASELINE COMPARISON</b><small>Same imported DEM · balanced scalar cost for A* and Dijkstra</small></div>
                 {benchmarkResults.map((result) => <div className="benchmark-row" key={result.algorithm}><span>{result.algorithm.replace('_', ' ').toUpperCase()}</span><b>{result.distance_m.toFixed(0)} m</b><b>{result.runtime_ms.toFixed(2)} ms</b><small>{result.expanded_nodes.toLocaleString()} expanded</small></div>)}
@@ -484,14 +842,74 @@ export default function App() {
               <MetricBar label="Data uncertainty" value={selected.metrics.uncertainty_pct} color="yellow" />
               <MetricBar label="Scientific value" value={selected.metrics.scientific_value_pct} color="green" />
             </div>
-            <div className="resource-block"><div className="resource-heading"><span className="eyebrow">RESOURCE MODEL</span><span className={`feasibility ${selected.metrics.return_feasible ? 'pass' : 'fail'}`}>{selected.metrics.return_feasible ? 'RETURN FEASIBLE' : 'LIMIT EXCEEDED'}</span></div><div className="resource-row"><span>Estimated energy</span><b>{selected.metrics.energy_wh.toFixed(1)} Wh</b></div><div className="resource-row"><span>Out-and-back time</span><b>{selected.metrics.return_time_estimate_min.toFixed(1)} min</b></div><div className="resource-row"><span>Out-and-back energy</span><b>{selected.metrics.return_energy_estimate_wh.toFixed(1)} Wh</b></div><div className="resource-row"><span>Outbound oxygen estimate</span><b>{selected.metrics.oxygen_l?.toFixed(1) ?? 'N/A'} L</b></div><div className="resource-row"><span>Out-and-back oxygen estimate</span><b>{selected.metrics.return_oxygen_l?.toFixed(1) ?? 'N/A'} L</b></div></div>
-            <div className="algorithm-card"><div className="algorithm-head"><span className="algorithm-icon">ƒ</span><div><b>HYBRID MULTI-OBJECTIVE A*</b><small>Bounded Pareto label search</small></div></div><div className="algorithm-stats"><div><b>{selected.search.expanded_nodes.toLocaleString()}</b><small>Expanded</small></div><div><b>{selected.search.generated_labels.toLocaleString()}</b><small>Labels</small></div><div><b>{selected.search.pareto_labels_at_goal}</b><small>Goal labels</small></div></div>{selected.search.runtime_ms !== undefined && <small className="algorithm-runtime">Profile: {selected.search.runtime_ms.toFixed(1)} ms · edge-cache hits: {(selected.search.edge_cache_hits ?? 0).toLocaleString()}</small>}</div>
+            <div className="resource-block">
+              <div className="resource-heading">
+                <span className="eyebrow">RESOURCE MODEL</span>
+                <span className={`feasibility ${selected.metrics.return_feasible ? 'pass' : 'fail'}`}>
+                  {selected.metrics.return_feasible ? 'RETURN FEASIBLE' : 'LIMIT EXCEEDED'}
+                </span>
+              </div>
+              <div className="resource-row"><span>Estimated energy</span><b>{selected.metrics.energy_wh.toFixed(1)} Wh</b></div>
+              <div className="resource-row"><span>Out-and-back time</span><b>{selected.metrics.return_time_estimate_min.toFixed(1)} min</b></div>
+              <div className="resource-row"><span>Out-and-back energy</span><b>{selected.metrics.return_energy_estimate_wh.toFixed(1)} Wh</b></div>
+              <div className="resource-row"><span>Outbound oxygen estimate</span><b>{selected.metrics.oxygen_l?.toFixed(1) ?? 'N/A'} L</b></div>
+              <div className="resource-row"><span>Out-and-back oxygen estimate</span><b>{selected.metrics.return_oxygen_l?.toFixed(1) ?? 'N/A'} L</b></div>
+            </div>
+            <div className="algorithm-card">
+              <div className="algorithm-head"><span className="algorithm-icon">ƒ</span><div><b>HYBRID MULTI-OBJECTIVE A*</b><small>Bounded Pareto label search</small></div></div>
+              <div className="algorithm-stats"><div><b>{selected.search?.expanded_nodes?.toLocaleString() ?? 'N/A'}</b><small>Expanded</small></div><div><b>{selected.search?.generated_labels?.toLocaleString() ?? 'N/A'}</b><small>Labels</small></div><div><b>{selected.search?.pareto_labels_at_goal ?? 'N/A'}</b><small>Goal labels</small></div></div>
+              {selected.search?.runtime_ms !== undefined && <small className="algorithm-runtime">Profile: {selected.search.runtime_ms.toFixed(1)} ms · edge-cache hits: {(selected.search.edge_cache_hits ?? 0).toLocaleString()}</small>}
+            </div>
+
+            {/* Downloadable Route Report */}
+            {plan && (
+              <div className="report-download-box">
+                <span className="eyebrow">OFFICIAL FLIGHT LOG</span>
+                <h4>Download Mission Report</h4>
+                <p>Exports complete mission parameters, DEM CRS & provenance, constraints, and route metrics.</p>
+                <div className="report-btn-group">
+                  <button className="report-btn" onClick={() => void downloadReport('markdown')} disabled={reportLoading}>
+                    {reportLoading ? 'GENERATING…' : 'MARKDOWN (.MD)'}
+                  </button>
+                  <button className="report-btn" onClick={() => void downloadReport('json')} disabled={reportLoading}>
+                    {reportLoading ? 'GENERATING…' : 'JSON (.JSON)'}
+                  </button>
+                </div>
+              </div>
+            )}
+
             <p className="metric-foot">{selected.metrics.model_note}</p>
           </div>}
 
           {activeTab === 'science' && <ScienceAssistant missionSite={selectedMissionSite} />}
 
-          {activeTab === 'data' && <DataExplorer missionSite={selectedMissionSite} terrainLoaded={Boolean(terrain && isVerifiedRealTerrain(terrain, selectedMissionSiteId))} sources={datasets} planId={plan?.plan_id} onTerrainImported={(nextTerrain) => { if (!isVerifiedRealTerrain(nextTerrain, selectedMissionSiteId)) { setError('Import rejected: the backend did not verify a real Mars DEM covering this selected site.'); return; } setTerrain(nextTerrain); setPlan(null); setRoutes([]); setBenchmarkResults([]); setError(''); setConditionNotice(''); setLayer('elevation'); const nextStart = INITIAL_START; const nextGoal = INITIAL_GOAL; setStart(nextStart); setGoal(nextGoal); }} />}
+          {activeTab === 'data' && (
+            <DataExplorer
+              missionSite={selectedMissionSite}
+              terrainLoaded={Boolean(terrain && isVerifiedRealTerrain(terrain, selectedMissionSiteId))}
+              terrain={terrain}
+              sources={datasets}
+              planId={plan?.plan_id}
+              onTerrainImported={(nextTerrain) => {
+                if (!isVerifiedRealTerrain(nextTerrain, selectedMissionSiteId)) {
+                  setError('Import rejected: the backend did not verify a real Mars DEM covering this selected site.');
+                  return;
+                }
+                setTerrain(nextTerrain);
+                setPlan(null);
+                setRoutes([]);
+                setWaypoints([]);
+                setBenchmarkResults([]);
+                setError('');
+                setConditionNotice('');
+                setLayer('elevation');
+                const nextStart = INITIAL_START;
+                const nextGoal = INITIAL_GOAL;
+                setStart(nextStart);
+                setGoal(nextGoal);
+              }}
+            />
+          )}
         </aside>
       </main>
       <footer className="app-footer"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain ? 'IMPORTED MARS DEM · SOURCE HASHED' : 'NO REAL DEM LOADED'}</span><span>NOT FOR OPERATIONAL USE</span></footer>

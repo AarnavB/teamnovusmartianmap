@@ -1,0 +1,26 @@
+{
+  "format": "PDS3_LABEL",
+  "identified_fields": {
+    "TARGET_NAME": "MARS",
+    "INSTRUMENT_ID": "CTX"
+  },
+  "product_id": null,
+  "data_set_id": null,
+  "mission": null,
+  "instrument": "CTX",
+  "target": "MARS",
+  "observation_start": null,
+  "observation_stop": null,
+  "map_projection": null,
+  "coordinate_system": null,
+  "positive_longitude_direction": null,
+  "latitude_type_fields": {},
+  "map_resolution": null,
+  "map_scale": null,
+  "object_context_note": "PDS3 OBJECT nesting is not interpreted as an instrument calibration model; inspect the complete original label.",
+  "source_filename": "demo.lbl",
+  "source_sha256": "579bf089c22ddee05664273f3f26f9459e7a8ab0de4e597118ae0aed746cf691",
+  "source_size_bytes": 65,
+  "raw_label": "PDS_VERSION_ID = PDS3\nTARGET_NAME = MARS\nINSTRUMENT_ID = CTX\nEND\n",
+  "preservation_note": "Original label text is included verbatim in this record. Parsed fields are convenience extracts; original label/SIS take precedence."
+}

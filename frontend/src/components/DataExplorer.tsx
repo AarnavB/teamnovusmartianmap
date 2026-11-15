@@ -28,7 +28,21 @@ function siteBounds(site: MissionSite): string {
   ].map((value) => value.toFixed(4)).join(',');
 }
 
-export default function DataExplorer({ sources, planId, onTerrainImported, missionSite, terrainLoaded }: { sources: OfficialSource[]; planId?: string; onTerrainImported: (terrain: TerrainData) => void; missionSite: MissionSite; terrainLoaded: boolean }) {
+export default function DataExplorer({
+  sources,
+  planId,
+  onTerrainImported,
+  missionSite,
+  terrainLoaded,
+  terrain,
+}: {
+  sources: OfficialSource[];
+  planId?: string;
+  onTerrainImported: (terrain: TerrainData) => void;
+  missionSite: MissionSite;
+  terrainLoaded: boolean;
+  terrain?: TerrainData | null;
+}) {
   const [keywords, setKeywords] = useState(() => `${missionSite.mission} ${missionSite.region} Mars`);
   const [instrument, setInstrument] = useState('HiRISE');
   const [pdsResult, setPdsResult] = useState<ArchiveResult | null>(null);
@@ -189,16 +203,57 @@ export default function DataExplorer({ sources, planId, onTerrainImported, missi
 
   return <div className="data-content archive-explorer">
     <section className="archive-search-card mission-dem-card">
-      <div className="archive-section-head"><b>ACTIVE SITE · AUTOMATIC REAL TERRAIN</b><span className="connected-tag">{terrainLoaded ? "REAL DEM READY" : "AUTO-LOAD ON SITE SELECT"}</span></div>
-      <h3>{missionSite.region}</h3>
+      <div className="archive-section-head">
+        <b>DEM GEOSPATIAL PROVENANCE</b>
+        <span className="connected-tag">{terrainLoaded ? "REAL DEM VERIFIED" : "LOADING OFFICIAL DEM"}</span>
+      </div>
+      <h3>{missionSite.region} ({missionSite.mission})</h3>
       <p><b>{missionSite.dem.product}</b></p>
-      <p>{missionSite.dem.source} · {missionSite.dem.resolutionM.toFixed(missionSite.dem.resolutionM < 2 ? 2 : 1)} m/post · {missionSite.dem.format}</p>
+      <p>{missionSite.dem.source} · Source resolution: {missionSite.dem.resolutionM.toFixed(missionSite.dem.resolutionM < 2 ? 2 : 1)} m/px · {missionSite.dem.format}</p>
       <p>{missionSite.dem.coverageNote}</p>
+
+      {terrain && (
+        <div className="provenance-detail-grid">
+          <div className="provenance-item">
+            <span>REFERENCE COORDINATES</span>
+            <strong>{missionSite.latitude.toFixed(5)}° N · {missionSite.longitudeEast.toFixed(5)}° E</strong>
+            <small>Planetocentric latitude, east-positive longitude</small>
+          </div>
+          <div className="provenance-item">
+            <span>COORDINATE SYSTEM (CRS)</span>
+            <strong>{String(terrain.coordinate_info?.crs ?? 'Mars 2000 Equirectangular')}</strong>
+            <small>Ellipsoid: IAU 2000 Mars sphere / triaxial</small>
+          </div>
+          <div className="provenance-item">
+            <span>ANALYSIS GRID GEOMETRY</span>
+            <strong>{terrain.width} × {terrain.height} cells · {terrain.cell_size_m.toFixed(1)} m/cell</strong>
+            <small>Local metric window: 2,400 m × 2,400 m</small>
+          </div>
+          <div className="provenance-item">
+            <span>SITE COVERAGE VERIFICATION</span>
+            <strong className={terrain.coordinate_info?.site_coverage_verified ? 'good' : 'bad'}>
+              {terrain.coordinate_info?.site_coverage_verified ? 'VERIFIED MATCH' : 'UNVERIFIED'}
+            </strong>
+            <small>Landing point within DEM footprint bounds</small>
+          </div>
+          <div className="provenance-item">
+            <span>SPATIAL DATA INTEGRITY</span>
+            <strong>Elevation, Slope, Roughness</strong>
+            <small>Directly sampled or derived from official raster</small>
+          </div>
+          <div className="provenance-item">
+            <span>UNAVAILABLE SCIENCE LAYERS</span>
+            <strong className="muted-text">Atmosphere, Radiation, Science, Regolith</strong>
+            <small>No synthetic interpolation. Real georeferenced data required.</small>
+          </div>
+        </div>
+      )}
+
       <div className="archive-search-line">
         <a href={missionSite.dem.downloadUrl} target="_blank" rel="noreferrer">OFFICIAL SOURCE FILE ↗</a>
         <a href={missionSite.dem.documentationUrl} target="_blank" rel="noreferrer">PRODUCT DOCUMENTATION ↗</a>
       </div>
-      <small>When this site is selected, the backend automatically retrieves this catalogued product if it is not already cached, validates its Mars CRS, metre units and site footprint, then prepares the route grid. Judges do not need to download or upload the DEM. No synthetic terrain is used as a fallback.</small>
+      <small>When this site is selected, the backend automatically retrieves this catalogued product if it is not already cached, validates its Mars CRS, metre units and site footprint, then prepares the route grid. No synthetic terrain is substituted.</small>
     </section>
     <div className="panel-title"><span className="eyebrow">OFFICIAL ARCHIVE CONNECTORS</span><h3>NASA data access</h3><p>Discover official products, inspect their original metadata, import geospatial rasters with provenance, and preserve selected mission materials for offline review.</p></div>
 

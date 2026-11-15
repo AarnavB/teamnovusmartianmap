@@ -92,6 +92,11 @@ def _is_allowed_download_host(host: str | None) -> bool:
     value = host.lower().rstrip(".")
     exact = {
         "planetarymaps.usgs.gov",
+        # astrogeology.usgs.gov is the USGS Astrogeology Science Center server.
+        # The USGS CTX DEM for Jezero and the Elysium CTX DEM both redirect
+        # through this host before reaching their final download URL.
+        # Verified as an official USGS planetary-data host.
+        "astrogeology.usgs.gov",
         "hirise.lpl.arizona.edu",
         "s3.amazonaws.com",
         "s3.us-west-2.amazonaws.com",
@@ -358,10 +363,16 @@ def load_or_fetch_site_terrain(site_id: str, site: dict[str, Any]) -> Terrain:
                 logger.warning("Ignoring invalid persistent DEM cache for %s: %s", site_id, exc)
 
     download_record: dict[str, Any] | None = None
+    was_freshly_downloaded: bool = False
+    was_restored_from_s3: bool = False
+
     if not source_path.is_file() or source_path.stat().st_size == 0:
         restored = bool(config and _download_s3_source(config, source_key, source_path))
-        if not restored:
+        if restored:
+            was_restored_from_s3 = True
+        else:
             download_record = _download_catalogued_dem(site_id, site, source_path)
+            was_freshly_downloaded = True
 
     try:
         coverage = validate_site_coverage(
@@ -378,6 +389,30 @@ def load_or_fetch_site_terrain(site_id: str, site: dict[str, Any]) -> Terrain:
             window_size_m=2400.0,
         )
     except (ValueError, RuntimeError, OSError) as exc:
+        # Remove the source file only when it was freshly downloaded this
+        # request. An S3-restored or pre-existing file is left in place so
+        # the next request can retry validation without re-downloading; it
+        # may also be needed for manual inspection. Never delete S3 objects.
+        if was_freshly_downloaded and source_path.is_file():
+            try:
+                source_path.unlink()
+                logger.info(
+                    "Removed freshly downloaded but invalid DEM for %s: %s",
+                    site_id,
+                    source_path.name,
+                )
+            except OSError as unlink_exc:
+                logger.warning(
+                    "Could not remove invalid downloaded DEM %s: %s",
+                    source_path,
+                    unlink_exc,
+                )
+        elif was_restored_from_s3 and source_path.is_file():
+            logger.warning(
+                "S3-restored DEM for %s failed validation; leaving file for manual inspection: %s",
+                site_id,
+                source_path.name,
+            )
         raise DemValidationError(
             f"The downloaded {site['dem']['product']} did not pass Mars CRS, metre-unit, or site-footprint validation: {exc}"
         ) from exc

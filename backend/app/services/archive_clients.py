@@ -11,7 +11,7 @@ import httpx
 
 PDS_SEARCH_BASE = "https://pds.nasa.gov/api/search/1"
 ODE_REST_BASE = "https://oderest.rsl.wustl.edu/live2"
-USER_AGENT = "MARSCOPE/0.3.1 (research prototype; NASA PDS archive client)"
+USER_AGENT = "MARSCOPE/0.4.0 (research prototype; NASA PDS archive client)"
 
 
 class ArchiveServiceError(RuntimeError):
