@@ -25,7 +25,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 function formatMetric(value: unknown, unit: string): string {
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? \`\${numeric.toFixed(1)} \${unit}\` : 'N/A';
+  return Number.isFinite(numeric) ? `${numeric.toFixed(1)} ${unit}` : 'N/A';
 }
 function humanize(value: string): string { return value.replace(/_/g, ' '); }
 
@@ -80,7 +80,7 @@ export default function MissionReplay({
   const metricsBefore = asRecord(eventData.metrics_before);
   const metricsAfter = asRecord(eventData.metrics_after);
   const visibleProgress = replayPath.slice(0, Math.min(frame + 1, replayPath.length));
-  const routePoints = (path: Point[]) => path.map((point) => \`\${point.x},\${terrainHeight - point.y}\`).join(' ');
+  const routePoints = (path: Point[]) => path.map((point) => `${point.x},${terrainHeight - point.y}`).join(' ');
   const replanCount = events.filter((event) => event.type === 'REPLAN_COMPLETED').length;
   const hasJev = events.some((event) => event.type === 'JEV_DECISION');
   const status = replanCount > 0 ? 'REPLANNED' : 'PLANNED';
@@ -113,7 +113,7 @@ export default function MissionReplay({
     <div className="mission-replay-body">
       <div className="replay-visual">
         <div className="replay-visual-title"><span>ROUTE RECONSTRUCTION</span><span>{replayPath.length} GRID CELLS</span></div>
-        <svg className="replay-map" viewBox={\`0 0 \${terrainWidth} \${terrainHeight}\`} role="img" aria-label="Animated replay of selected mission route">
+        <svg className="replay-map" viewBox={`0 0 ${terrainWidth} ${terrainHeight}`} role="img" aria-label="Animated replay of selected mission route">
           {isReplan && beforePath.length > 1 && <polyline className="replay-before" points={routePoints(beforePath)} />}
           {replayPath.length > 1 && <polyline className="replay-after" points={routePoints(replayPath)} />}
           {visibleProgress.length > 1 && <polyline className="replay-progress" points={routePoints(visibleProgress)} />}
@@ -126,7 +126,7 @@ export default function MissionReplay({
           <button onClick={() => { setPlaying(false); setFrame((value) => Math.min(Math.max(0, replayPath.length - 1), value + 1)); }}>STEP FORWARD</button>
         </div>
         <input className="replay-range" type="range" min={0} max={Math.max(0, replayPath.length - 1)} value={Math.min(frame, Math.max(0, replayPath.length - 1))} onChange={(event) => { setPlaying(false); setFrame(Number(event.target.value)); }} aria-label="Route animation progress" />
-        <div className="replay-visual-title"><span>ANIMATION POSITION</span><span>{replayPath.length ? \`\${Math.min(frame + 1, replayPath.length)} / \${replayPath.length}\` : 'N/A'}</span></div>
+        <div className="replay-visual-title"><span>ANIMATION POSITION</span><span>{replayPath.length ? `${Math.min(frame + 1, replayPath.length)} / ${replayPath.length}` : 'N/A'}</span></div>
       </div>
       <div className="replay-side">
         <div className="replay-event-current">
