@@ -66,8 +66,8 @@ export default function ScientificTerrainInspector({
   const blocked = obstacleFlag === true || blockedBySlope || blockedByTemperature || isNoData === true;
   const plannerStatus = !inBounds ? 'OUT OF GRID'
     : isNoData === true ? 'BLOCKED · NO DATA'
-      : !hasMaskCell ? 'NOT ASSESSED · MASK MISSING'
-        : blocked ? 'BLOCKED UNDER CURRENT FILTERS' : 'TRAVERSABLE UNDER CURRENT FILTERS';
+      : blocked ? 'BLOCKED UNDER CURRENT FILTERS'
+        : !hasMaskCell ? 'NOT ASSESSED · MASK MISSING' : 'TRAVERSABLE UNDER CURRENT FILTERS';
 
   const cellSize = Number.isFinite(terrain.cell_size_m) && terrain.cell_size_m > 0 ? terrain.cell_size_m : null;
   const targetMatches = (terrain.targets ?? [])
@@ -220,6 +220,8 @@ export default function ScientificTerrainInspector({
         </div>
         <div className="inspector-source-meta">
           <StatusLine label="SITE MISSION CONTEXT" value={missionName} />
+          <StatusLine label="ACTIVE TERRAIN DATASET" value={terrain.name || 'Unnamed imported terrain'} />
+          <StatusLine label="TERRAIN DATASET ID" value={terrain.id || 'Not supplied'} />
           <StatusLine label="RASTER CRS" value={crs} />
           <StatusLine label="CELL SPACING" value={cellSize !== null ? `${cellSize.toFixed(2)} m` : 'Not available'} />
           <StatusLine label="INSTRUMENT ATTRIBUTION" value="Not supplied in terrain payload" state="muted" />
