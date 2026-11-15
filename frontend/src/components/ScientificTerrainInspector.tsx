@@ -59,14 +59,14 @@ export default function ScientificTerrainInspector({
   const elevationRaw = inBounds ? terrain.elevation_m?.[y]?.[x] : undefined;
   const slopeRaw = inBounds ? terrain.slope_deg?.[y]?.[x] : undefined;
   const roughnessRaw = inBounds ? terrain.roughness?.[y]?.[x] : undefined;
-  const elevation = isValidSample && available.has('elevation') ? numericCell(elevationRaw) : null;
-  const slope = isValidSample && available.has('slope') ? numericCell(slopeRaw) : null;
-  const roughness = isValidSample && available.has('roughness') ? numericCell(roughnessRaw) : null;
+  const elevation: number | null = isValidSample && available.has('elevation') ? numericCell(elevationRaw) : null;
+  const slope: number | null = isValidSample && available.has('slope') ? numericCell(slopeRaw) : null;
+  const roughness: number | null = isValidSample && available.has('roughness') ? numericCell(roughnessRaw) : null;
   const temperatureRaw = inBounds ? terrain.temperature_c?.[y]?.[x] : undefined;
-  const temperature = inBounds && isValidSample && available.has('temperature') ? numericCell(temperatureRaw) : null;
+  const temperature: number | null = inBounds && isValidSample && available.has('temperature') ? numericCell(temperatureRaw) : null;
   const obstacleFlag = inBounds ? terrain.obstacle?.[y]?.[x] : undefined;
-  const blockedBySlope = slope !== null && slope > maxSlopeDeg;
-  const blockedByTemperature = temperature !== null && temperature > -35;
+  const blockedBySlope = slope != null && slope > maxSlopeDeg;
+  const blockedByTemperature = temperature != null && temperature > -35;
   const blocked = obstacleFlag === true || blockedBySlope || blockedByTemperature || isNoData === true;
   const plannerStatus = !inBounds ? 'OUT OF GRID'
     : isNoData === true ? 'BLOCKED · NO DATA'
@@ -83,7 +83,7 @@ export default function ScientificTerrainInspector({
     .sort((a, b) => a.distanceCells - b.distanceCells)
     .slice(0, 3);
   const scienceRaw = inBounds ? terrain.science_potential?.[y]?.[x] : undefined;
-  const scienceValue = isValidSample && available.has('science') ? numericCell(scienceRaw) : null;
+  const scienceValue: number | null = isValidSample && available.has('science') ? numericCell(scienceRaw) : null;
   const isSimulated = terrain.status === 'SIMULATED_NOT_GEOREFERENCED';
   const sourceStatus: MetricStatus = isSimulated ? 'SIMULATED' : 'IMPORTED';
   const crs = typeof terrain.coordinate_info?.crs === 'string' ? terrain.coordinate_info.crs : 'Not supplied';
@@ -130,31 +130,31 @@ export default function ScientificTerrainInspector({
         <div className="inspector-metric-grid">
           <MetricCard
             label="ELEVATION"
-            value={elevation !== null ? elevation.toFixed(2) : 'N/A'}
-            unit={elevation !== null ? 'm' : undefined}
-            status={elevation !== null ? sourceStatus : 'NOT AVAILABLE'}
-            detail={elevation !== null ? 'Imported source-raster elevation' : isNoData ? 'Cell is outside valid DEM coverage' : 'No verified valid elevation sample'}
+            value={elevation != null ? elevation.toFixed(2) : 'N/A'}
+            unit={elevation != null ? 'm' : undefined}
+            status={elevation != null ? sourceStatus : 'NOT AVAILABLE'}
+            detail={elevation != null ? 'Imported source-raster elevation' : isNoData ? 'Cell is outside valid DEM coverage' : 'No verified valid elevation sample'}
           />
           <MetricCard
             label="SLOPE"
-            value={slope !== null ? slope.toFixed(2) : 'N/A'}
-            unit={slope !== null ? '°' : undefined}
-            status={slope !== null ? 'DERIVED' : 'NOT AVAILABLE'}
-            detail={slope !== null ? 'Gradient-derived from the imported DEM' : 'No valid slope sample at this cell'}
+            value={slope != null ? slope.toFixed(2) : 'N/A'}
+            unit={slope != null ? '°' : undefined}
+            status={slope != null ? 'DERIVED' : 'NOT AVAILABLE'}
+            detail={slope != null ? 'Gradient-derived from the imported DEM' : 'No valid slope sample at this cell'}
           />
           <MetricCard
             label="ROUGHNESS"
-            value={roughness !== null ? roughness.toFixed(3) : 'N/A'}
-            unit={roughness !== null ? 'index' : undefined}
-            status={roughness !== null ? 'DERIVED' : 'NOT AVAILABLE'}
-            detail={roughness !== null ? '3 × 3 local standard deviation, normalized 0–1' : 'No valid roughness sample at this cell'}
+            value={roughness != null ? roughness.toFixed(3) : 'N/A'}
+            unit={roughness != null ? 'index' : undefined}
+            status={roughness != null ? 'DERIVED' : 'NOT AVAILABLE'}
+            detail={roughness != null ? '3 × 3 local standard deviation, normalized 0–1' : 'No valid roughness sample at this cell'}
           />
           <MetricCard
             label="SCIENCE POTENTIAL"
-            value={scienceValue !== null ? scienceValue.toFixed(3) : 'N/A'}
-            unit={scienceValue !== null ? 'index' : undefined}
-            status={scienceValue !== null ? (isSimulated ? 'SIMULATED' : 'IMPORTED') : 'NOT AVAILABLE'}
-            detail={scienceValue !== null ? 'Spatial science-priority layer value' : 'No science-priority raster registered for this DEM'}
+            value={scienceValue != null ? scienceValue.toFixed(3) : 'N/A'}
+            unit={scienceValue != null ? 'index' : undefined}
+            status={scienceValue != null ? (isSimulated ? 'SIMULATED' : 'IMPORTED') : 'NOT AVAILABLE'}
+            detail={scienceValue != null ? 'Spatial science-priority layer value' : 'No science-priority raster registered for this DEM'}
           />
         </div>
         <div className="inspector-classification">
