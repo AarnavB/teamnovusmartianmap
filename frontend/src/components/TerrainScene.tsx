@@ -120,19 +120,19 @@ export default function TerrainScene(props: Props) {
         colors.push(color.r, color.g, color.b);
       }
     }
+    const validMask = props.terrain.valid_mask;
     for (let y = 0; y < height - 1; y++) {
       for (let x = 0; x < width - 1; x++) {
         const a = y * width + x;
         const b = a + 1;
         const c = a + width;
         const d = c + 1;
-        const valid = (index: number) => {
-          const cellY = Math.floor(index / width);
-          const cellX = index % width;
-          return props.terrain.valid_mask?.[cellY]?.[cellX] !== false;
-        };
-        if (valid(a) && valid(c) && valid(b)) indices.push(a, c, b);
-        if (valid(b) && valid(c) && valid(d)) indices.push(b, c, d);
+        const aValid = validMask?.[y]?.[x] !== false;
+        const bValid = validMask?.[y]?.[x + 1] !== false;
+        const cValid = validMask?.[y + 1]?.[x] !== false;
+        const dValid = validMask?.[y + 1]?.[x + 1] !== false;
+        if (aValid && cValid && bValid) indices.push(a, c, b);
+        if (bValid && cValid && dValid) indices.push(b, c, d);
       }
     }
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
