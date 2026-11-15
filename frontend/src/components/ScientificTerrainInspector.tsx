@@ -12,6 +12,10 @@ type Props = {
 
 type MetricStatus = 'IMPORTED' | 'DERIVED' | 'SIMULATED' | 'NOT AVAILABLE';
 
+function numericCell(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
 function MetricCard({
   label, value, unit, status, detail,
 }: {
@@ -55,11 +59,11 @@ export default function ScientificTerrainInspector({
   const elevationRaw = inBounds ? terrain.elevation_m?.[y]?.[x] : undefined;
   const slopeRaw = inBounds ? terrain.slope_deg?.[y]?.[x] : undefined;
   const roughnessRaw = inBounds ? terrain.roughness?.[y]?.[x] : undefined;
-  const elevation = isValidSample && available.has('elevation') && Number.isFinite(elevationRaw) ? elevationRaw : null;
-  const slope = isValidSample && available.has('slope') && Number.isFinite(slopeRaw) ? slopeRaw : null;
-  const roughness = isValidSample && available.has('roughness') && Number.isFinite(roughnessRaw) ? roughnessRaw : null;
-  const temperature = inBounds && isValidSample && available.has('temperature')
-    && Number.isFinite(terrain.temperature_c?.[y]?.[x]) ? terrain.temperature_c?.[y]?.[x] ?? null : null;
+  const elevation = isValidSample && available.has('elevation') ? numericCell(elevationRaw) : null;
+  const slope = isValidSample && available.has('slope') ? numericCell(slopeRaw) : null;
+  const roughness = isValidSample && available.has('roughness') ? numericCell(roughnessRaw) : null;
+  const temperatureRaw = inBounds ? terrain.temperature_c?.[y]?.[x] : undefined;
+  const temperature = inBounds && isValidSample && available.has('temperature') ? numericCell(temperatureRaw) : null;
   const obstacleFlag = inBounds ? terrain.obstacle?.[y]?.[x] : undefined;
   const blockedBySlope = slope !== null && slope > maxSlopeDeg;
   const blockedByTemperature = temperature !== null && temperature > -35;
@@ -79,7 +83,7 @@ export default function ScientificTerrainInspector({
     .sort((a, b) => a.distanceCells - b.distanceCells)
     .slice(0, 3);
   const scienceRaw = inBounds ? terrain.science_potential?.[y]?.[x] : undefined;
-  const scienceValue = isValidSample && available.has('science') && Number.isFinite(scienceRaw) ? scienceRaw : null;
+  const scienceValue = isValidSample && available.has('science') ? numericCell(scienceRaw) : null;
   const isSimulated = terrain.status === 'SIMULATED_NOT_GEOREFERENCED';
   const sourceStatus: MetricStatus = isSimulated ? 'SIMULATED' : 'IMPORTED';
   const crs = typeof terrain.coordinate_info?.crs === 'string' ? terrain.coordinate_info.crs : 'Not supplied';
