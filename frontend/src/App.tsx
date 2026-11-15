@@ -7,9 +7,13 @@ import RouteExplainability from './components/RouteExplainability';
 import RouteComparisonTable from './components/RouteComparisonTable';
 import MissionReplay from './components/MissionReplay';
 import SensitivityAnalysis from './components/SensitivityAnalysis';
+import DataProvenancePanel from './components/DataProvenancePanel';
+import ScientificTargetsPanel from './components/ScientificTargetsPanel';
+import RouteRobustnessPanel from './components/RouteRobustnessPanel';
+import AstronautHud from './components/AstronautHud';
 import { api } from './api';
 import { DEFAULT_MISSION_SITE_ID, MISSION_SITES } from './missionSites';
-import type { BenchmarkResult, JevPathfindingWeights, JevProvider, MissionEvent, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, Route, TerrainData } from './types';
+import type { BenchmarkResult, JevPathfindingWeights, JevProvider, MissionEvent, MissionConstraintsPayload, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, Route, Target, TerrainData } from './types';
 
 type ActiveJevDecision = { siteId: string; result: JevPathfindingWeights };
 type Layer = 'elevation' | 'slope' | 'roughness' | 'regolith' | 'temperature' | 'environment' | 'radiation' | 'uncertainty' | 'science';
@@ -64,6 +68,11 @@ export default function App() {
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [missionEvents, setMissionEvents] = useState<MissionEvent[]>([]);
+  const [customScienceTargets, setCustomScienceTargets] = useState<Target[]>([]);
+  const [selectedScienceTargetIds, setSelectedScienceTargetIds] = useState<string[]>([]);
+  const [scienceTargetScores, setScienceTargetScores] = useState<Record<string, number>>({});
+  const [hudOpen, setHudOpen] = useState(false);
+  const [hudMode, setHudMode] = useState<'desktop' | 'helmet' | 'minimal'>('helmet');
   const [selectedRoute, setSelectedRoute] = useState('B');
   const [start, setStart] = useState<Point>(INITIAL_START);
   const [goal, setGoal] = useState<Point>(INITIAL_GOAL);
@@ -72,7 +81,8 @@ export default function App() {
   const [viewMode, setViewMode] = useState<'3D' | '2D'>('3D');
   const [pickMode, setPickMode] = useState<'start' | 'goal' | 'waypoint' | null>(null);
   const [evaMode, setEvaMode] = useState(false);
-  const [activeTab, setActiveTab] = useState<'planner' | 'jev' | 'data'>('planner');
+  const [activeTab, setActiveTab] = useState<'planner' | 'jev' | 'science'>('planner');
+  const [dataMenuOpen, setDataMenuOpen] = useState(false);
   const [maxSlope, setMaxSlope] = useState(22);
   const [evaMinutes, setEvaMinutes] = useState(180);
   const [energyBudgetWh, setEnergyBudgetWh] = useState(180);
@@ -115,6 +125,24 @@ export default function App() {
 
   const selectedMissionSite = MISSION_SITES.find((site) => site.id === selectedMissionSiteId) ?? MISSION_SITES[0];
   const hasAtmosphere = (terrain?.available_layers ?? []).includes('atmosphere');
+  const scienceTargets = useMemo(() => {
+    const unique = new Map<string, Target>();
+    [...(terrain?.targets ?? []), ...customScienceTargets].forEach((target) => unique.set(target.id, target));
+    return [...unique.values()];
+  }, [terrain?.targets, customScienceTargets]);
+  const selectedScienceTargets = useMemo(
+    () => scienceTargets.filter((target) => selectedScienceTargetIds.includes(target.id)),
+    [scienceTargets, selectedScienceTargetIds],
+  );
+  const robustnessConstraints = useMemo<MissionConstraintsPayload>(() => ({
+    max_slope_deg: maxSlope,
+    eva_limit_minutes: evaMinutes,
+    energy_budget_wh: energyBudgetWh,
+    oxygen_budget_l: oxygenBudget,
+    oxygen_consumption_lpm: oxygenRate,
+    carried_equipment_mass_kg: equipmentMass,
+    rest_interval_min: restInterval,
+  }), [maxSlope, evaMinutes, energyBudgetWh, oxygenBudget, oxygenRate, equipmentMass, restInterval]);
 
   useEffect(() => {
     let alive = true;
@@ -149,6 +177,11 @@ export default function App() {
     setAddedObstacles([]);
     setReplanResult(null);
     setMissionEvents([]);
+    setCustomScienceTargets([]);
+    setSelectedScienceTargetIds([]);
+    setScienceTargetScores({});
+    setHudOpen(false);
+    setDataMenuOpen(false);
     setConditionNotice('');
     setEvaProgressIndex(0);
     setStart(INITIAL_START);
@@ -541,8 +574,8 @@ export default function App() {
   if (loading) return <div className="boot-screen"><div className="boot-mark">M</div><div className="boot-title">MARSCOPE</div><div className="boot-sub">INITIALIZING PLANETARY SYSTEMS</div><div className="boot-bar"><span /></div></div>;
 
   return (
-    <div className="app-shell">
-      <header className="topbar">
+    <div className="app-shell min-h-screen bg-[#0b0d10] text-stone-100 antialiased">
+      <header className="topbar sticky top-0 z-30 backdrop-blur-xl">
         <div className="brand-block">
           <div className="brand-mark">M</div>
           <div><div className="brand-name">MARSCOPE</div><div className="brand-tag">FROM ORBIT TO BOOTPRINT</div></div>
@@ -551,8 +584,8 @@ export default function App() {
         <div className="top-status"><span className={`status-dot ${status === 'OK' ? 'online' : 'offline'}`} /> API {status} <span className="top-divider" /> <span className="mono">BUILD 0.4.0</span></div>
       </header>
 
-      <main className="workspace">
-        <section className="left-rail">
+      <main className="workspace grid min-h-0 gap-3 p-3 xl:grid-cols-[260px_minmax(0,1fr)_320px]">
+        <section className="left-rail min-w-0">
           <div className="rail-head"><span className="eyebrow">MISSION AREA</span><span className="live-chip">{terrainLoading ? 'LOADING' : terrain ? 'REAL DEM' : 'NO REAL DEM'}</span></div>
           <div className="location-card mission-site-card">
             <div className="planet-glyph">♂</div>
@@ -661,7 +694,7 @@ export default function App() {
           <div className="rail-footnote"><span className="warning-icon">!</span><p>Research prototype only. Never use these paths as operational astronaut guidance.</p></div>
         </section>
 
-        <section className="center-column">
+        <section className="center-column min-w-0">
           <div className="view-header">
             <div><div className="eyebrow">SURFACE RECONNAISSANCE</div><h1>{selectedMissionSite.region} <span>/</span> {selectedMissionSite.feature}</h1></div>
             <div className="view-actions">
@@ -678,6 +711,9 @@ export default function App() {
               </button>
               <button className={`eva-toggle ${evaMode ? 'on' : ''}`} onClick={() => setEvaMode(!evaMode)}>
                 <span className="eva-dot" /> EVA MODE
+              </button>
+              <button className="hud-launch-button" onClick={() => setHudOpen(true)} disabled={!terrain}>
+                ⌖ OPEN ASTRONAUT HUD
               </button>
             </div>
           </div>
@@ -703,6 +739,8 @@ export default function App() {
                 waypoints={waypoints}
                 previewRoute={previewRoute}
                 deviationPoint={deviationPoint}
+                scientificTargets={scienceTargets}
+                selectedScientificTargetIds={selectedScienceTargetIds}
               />
             )}
             {terrainLoading && <div className="terrain-loading-state"><span className="spinner" /> LOADING {selectedMissionSite.region.toUpperCase()} TERRAIN</div>}
@@ -921,6 +959,18 @@ export default function App() {
                 />
               )}
 
+              {terrain && selected && (
+                <RouteRobustnessPanel
+                  siteId={selectedMissionSiteId}
+                  terrain={terrain}
+                  start={start}
+                  goal={goal}
+                  maxSlope={maxSlope}
+                  constraints={robustnessConstraints}
+                  selectedRoute={selected}
+                />
+              )}
+
               {plan && (
                 <MissionReplay
                   events={missionEvents}
@@ -931,6 +981,9 @@ export default function App() {
                   selectedRoute={selected ?? null}
                   onExportReplay={() => void downloadReport('json')}
                   exporting={reportLoading}
+                  scienceTargets={selectedScienceTargets}
+                  cellSizeM={terrain?.cell_size_m ?? 1}
+                  onExportSummary={() => void downloadReport('markdown')}
                 />
               )}
 
@@ -944,8 +997,13 @@ export default function App() {
           )}
         </section>
 
-        <aside className="right-rail">
-          <div className="right-tabs"><button className={activeTab === 'planner' ? 'active' : ''} onClick={() => setActiveTab('planner')}>ANALYTICS</button><button className={activeTab === 'jev' ? 'active' : ''} onClick={() => setActiveTab('jev')}>JEV INTEL</button><button className={activeTab === 'data' ? 'active' : ''} onClick={() => setActiveTab('data')}>DATA</button></div>
+        <aside className="right-rail min-w-0">
+          <div className="right-tabs">
+            <button className={activeTab === 'planner' ? 'active' : ''} onClick={() => setActiveTab('planner')}>ANALYTICS</button>
+            <button className={activeTab === 'science' ? 'active' : ''} onClick={() => setActiveTab('science')}>SCIENCE</button>
+            <button className={activeTab === 'jev' ? 'active' : ''} onClick={() => setActiveTab('jev')}>JEV INTEL</button>
+            <button className={`data-launch ${dataMenuOpen ? 'active' : ''}`} onClick={() => setDataMenuOpen(true)} aria-haspopup="dialog" aria-expanded={dataMenuOpen}>DATA <span className="data-launch-glyph">↗</span></button>
+          </div>
           {activeTab === 'planner' && selected && <div className="analytics-content">
             <div className="analytics-head"><span className="eyebrow">SELECTED PROFILE</span><div className="selected-title"><span className={`route-letter route-${selected.id}`}>{selected.id}</span><h3>{selected.name}</h3></div></div>
             <div className="metric-hero"><div><span>TOTAL DISTANCE</span><strong>{selected.metrics.distance_m.toFixed(0)}<small>m</small></strong></div><div><span>TRAVEL TIME</span><strong>{selected.metrics.duration_min.toFixed(1)}<small>min</small></strong></div></div>
@@ -995,6 +1053,42 @@ export default function App() {
             <p className="metric-foot">{selected.metrics.model_note}</p>
           </div>}
 
+          {activeTab === 'science' && (
+            <ScientificTargetsPanel
+              terrain={terrain}
+              customTargets={customScienceTargets}
+              selectedIds={selectedScienceTargetIds}
+              scores={scienceTargetScores}
+              start={start}
+              onTargetsChange={setCustomScienceTargets}
+              onSelectedChange={(ids) => {
+                const boundedIds = ids.slice(0, 5);
+                setSelectedScienceTargetIds(boundedIds);
+                const selectedTargets = scienceTargets.filter((target) => boundedIds.includes(target.id));
+                const seen = new Set<string>();
+                const nextWaypoints = selectedTargets
+                  .map((target) => ({ x: Math.round(target.x), y: Math.round(target.y) }))
+                  .filter((point) => {
+                    const key = `${point.x},${point.y}`;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                  })
+                  .slice(0, 5);
+                setWaypoints(nextWaypoints);
+                void runPlan(start, goal, nextWaypoints);
+              }}
+              onScoresChange={setScienceTargetScores}
+              onSetDestination={(point) => {
+                setGoal(point);
+                setWaypoints([]);
+                setPickMode(null);
+                setActiveTab('planner');
+                void runPlan(start, point, []);
+              }}
+            />
+          )}
+
           {activeTab === 'jev' && (
             <DecisionCenter
               siteName={`${selectedMissionSite.region} · ${selectedMissionSite.mission}`}
@@ -1017,37 +1111,70 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'data' && (
-            <DataExplorer
-              missionSite={selectedMissionSite}
-              terrainLoaded={Boolean(terrain && isVerifiedRealTerrain(terrain, selectedMissionSiteId))}
-              terrain={terrain}
-              sources={datasets}
-              planId={plan?.plan_id}
-              onTerrainImported={(nextTerrain) => {
-                if (!isVerifiedRealTerrain(nextTerrain, selectedMissionSiteId)) {
-                  setError('Import rejected: the backend did not verify a real Mars DEM covering this selected site.');
-                  return;
-                }
-                setTerrain(nextTerrain);
-                setActiveJevDecision(null);
-                setPlan(null);
-                setRoutes([]);
-                setWaypoints([]);
-                setBenchmarkResults([]);
-                setError('');
-                setConditionNotice('');
-                setLayer('elevation');
-                const nextStart = INITIAL_START;
-                const nextGoal = INITIAL_GOAL;
-                setStart(nextStart);
-                setGoal(nextGoal);
-              }}
-            />
-          )}
         </aside>
       </main>
-      <footer className="app-footer"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain ? 'IMPORTED MARS DEM · SOURCE HASHED' : 'NO REAL DEM LOADED'}</span><span>NOT FOR OPERATIONAL USE</span></footer>
+      {dataMenuOpen && (
+        <div className="data-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDataMenuOpen(false); }}>
+          <section className="data-modal-panel" role="dialog" aria-modal="true" aria-labelledby="data-modal-title">
+            <header className="data-modal-header">
+              <div><span className="eyebrow">MISSION DATA SYSTEMS / 03</span><h2 id="data-modal-title">Data catalogue & provenance</h2><p>Source discovery, terrain ingestion, layer lineage and offline map packages.</p></div>
+              <button className="data-modal-close" onClick={() => setDataMenuOpen(false)} aria-label="Close data catalogue">×</button>
+            </header>
+            <div className="data-modal-meta"><span><i /> LIVE DATA INTERFACE</span><span>{datasets.length} CATALOGUED SOURCES</span><span>{terrain ? 'TERRAIN LOADED' : 'AWAITING TERRAIN'}</span></div>
+            <div className="data-modal-body">
+              <DataProvenancePanel missionSite={selectedMissionSite} terrain={terrain} sources={datasets} />
+              <DataExplorer
+                missionSite={selectedMissionSite}
+                terrainLoaded={Boolean(terrain && isVerifiedRealTerrain(terrain, selectedMissionSiteId))}
+                terrain={terrain}
+                sources={datasets}
+                planId={plan?.plan_id}
+                onTerrainImported={(nextTerrain) => {
+                  if (!isVerifiedRealTerrain(nextTerrain, selectedMissionSiteId)) {
+                    setError('Import rejected: the backend did not verify a real Mars DEM covering this selected site.');
+                    return;
+                  }
+                  setTerrain(nextTerrain);
+                  setActiveJevDecision(null);
+                  setPlan(null);
+                  setRoutes([]);
+                  setWaypoints([]);
+                  setBenchmarkResults([]);
+                  setError('');
+                  setConditionNotice('');
+                  setLayer('elevation');
+                  const nextStart = INITIAL_START;
+                  const nextGoal = INITIAL_GOAL;
+                  setStart(nextStart);
+                  setGoal(nextGoal);
+                }}
+              />
+            </div>
+          </section>
+        </div>
+      )}
+
+      {hudOpen && (
+        <AstronautHud
+          mode={hudMode}
+          onModeChange={setHudMode}
+          onClose={() => setHudOpen(false)}
+          siteName={selectedMissionSite.region}
+          terrain={terrain}
+          route={selected ?? null}
+          start={start}
+          goal={goal}
+          currentPosition={evaPosition}
+          progressIndex={evaIndex}
+          targets={scienceTargets}
+          selectedTargetIds={selectedScienceTargetIds}
+          maxSlope={maxSlope}
+          oxygenRemainingL={Math.max(0, oxygenBudget - elapsedOxygenL)}
+          energyRemainingWh={Math.max(0, energyBudgetWh - elapsedEnergyWh)}
+          evaMinutesRemaining={remainingEVAClockMin}
+        />
+      )}
+      <footer className="app-footer flex items-center justify-between"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain ? 'IMPORTED MARS DEM · SOURCE HASHED' : 'NO REAL DEM LOADED'}</span><span>NOT FOR OPERATIONAL USE</span></footer>
     </div>
   );
 }

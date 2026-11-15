@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { Point, Route, TerrainData } from '../types';
+import type { Point, Route, Target, TerrainData } from '../types';
 
 const VERTICAL_EXAGGERATION = 5;
 
@@ -24,6 +24,8 @@ type Props = {
   waypoints?: Point[];
   previewRoute?: { path: Point[]; label: string } | null;
   deviationPoint?: Point | null;
+  scientificTargets?: Target[];
+  selectedScientificTargetIds?: string[];
 };
 
 type Latest = Omit<Props, 'terrain'>;
@@ -305,7 +307,11 @@ export default function TerrainScene(props: Props) {
     };
     addSphere(props.start, '#f4eee3', 1.3);
     addSphere(props.goal, '#f2a45b', 1.6);
-    for (const target of props.terrain.targets) addSphere(target, '#d5c779', 0.75, 2.0);
+    const scienceTargets = props.scientificTargets ?? props.terrain.targets;
+    for (const target of scienceTargets) {
+      const isSelected = (props.selectedScientificTargetIds ?? []).includes(target.id);
+      addSphere(target, isSelected ? '#f4e6a1' : '#71d2c5', isSelected ? 1.55 : 1.05, 3.8);
+    }
     for (const obstacle of props.obstacles) addSphere(obstacle, '#e25f4e', 1.05, 2.6);
     if (props.evaPosition) addSphere(props.evaPosition, '#70e0c0', 1.45, 4.0);
 
@@ -366,6 +372,8 @@ export default function TerrainScene(props: Props) {
     props.waypoints,
     props.previewRoute,
     props.deviationPoint,
+    props.scientificTargets,
+    props.selectedScientificTargetIds,
   ]);
 
   return <div className="terrain-canvas" ref={mountRef} aria-label="Interactive 3D terrain model derived from an imported Mars DEM. Drag to orbit, scroll to zoom, click to set route points." />;
