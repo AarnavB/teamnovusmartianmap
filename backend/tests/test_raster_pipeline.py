@@ -56,6 +56,48 @@ def test_site_coverage_uses_pyproj_crs_and_planetocentric_latitude(tmp_path):
     assert coverage["reference_latitude_planetographic_for_transform"] == pytest.approx(latitude_planetographic)
 
 
+
+def test_site_coverage_prefers_planetocentric_coordinate_with_valid_local_data(tmp_path):
+    from pyproj import CRS as PyprojCRS, Transformer
+
+    projected = PyprojCRS.from_wkt(MARS_CRS.to_wkt())
+    geographic = projected.geodetic_crs
+    latitude_planetocentric = 4.5
+    longitude_east = 135.9
+    transformer = Transformer.from_crs(geographic, projected, always_xy=True)
+    center_x, center_y = transformer.transform(longitude_east, latitude_planetocentric)
+
+    # At 4.5 degrees, converting this ellipsoidal CRS to planetographic shifts
+    # the centre by more than the 2.4 km route window. The USGS InSight product
+    # is labelled planetocentric, so this raw coordinate has the valid data.
+    path = tmp_path / "insight_planetocentric_coverage.tif"
+    _write(
+        path,
+        np.ones((128, 128), dtype=np.float32),
+        transform=from_origin(center_x - 1280.0, center_y + 1280.0, 20.0, 20.0),
+    )
+
+    coverage = validate_site_coverage(
+        path,
+        latitude=latitude_planetocentric,
+        longitude_east=longitude_east,
+    )
+
+    assert coverage["coverage_verified"] is True
+    assert coverage["reference_latitude_convention"] == "planetocentric"
+    assert coverage["projected_reference_xy_m"] == pytest.approx([center_x, center_y])
+    assert coverage["local_window_valid_fraction"] == pytest.approx(1.0)
+
+    terrain, _ = dem_to_terrain(
+        path,
+        width=96,
+        height=96,
+        window_center_xy_m=tuple(coverage["projected_reference_xy_m"]),
+        window_size_m=2400.0,
+    )
+    assert np.asarray(terrain.valid_mask, dtype=bool).all()
+
+
 def test_mars_dem_ingest_derives_slope_and_roughness_and_keeps_unknowns(tmp_path):
     y, x = np.indices((32, 32))
     dem = (100 + x * 0.4 + y * 0.2).astype(np.float32)
