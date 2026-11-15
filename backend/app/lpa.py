@@ -120,9 +120,30 @@ class LPAStar:
                 for succ in self._neighbors(u):
                     self._update_vertex(succ)
 
+    def _invalidate_changed_edges(self, changed: set[tuple[int, int]]) -> None:
+        """Drop cached edge vectors whose cost or corner clearance has changed."""
+        if not changed:
+            return
+        cache = self.edge_model.edge_cache
+        for edge in tuple(cache):
+            x0, y0, x1, y1 = edge
+            if (x0, y0) in changed or (x1, y1) in changed:
+                cache.pop(edge, None)
+                continue
+            # A diagonal edge is also invalid when either orthogonal corner
+            # cell changes, even though that cell is not an edge endpoint.
+            if x0 != x1 and y0 != y1 and (
+                (x1, y0) in changed or (x0, y1) in changed
+            ):
+                cache.pop(edge, None)
+
     def update_cells(self, changed: list[tuple[int, int]]) -> None:
+        changed_cells = set(changed)
+        if not changed_cells:
+            return
+        self._invalidate_changed_edges(changed_cells)
         affected: set[tuple[int, int]] = set()
-        for p in changed:
+        for p in changed_cells:
             affected.add(p)
             affected.update(self._neighbors(p))
         for p in affected:

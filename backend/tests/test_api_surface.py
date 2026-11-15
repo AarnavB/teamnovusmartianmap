@@ -1,5 +1,17 @@
 from fastapi.testclient import TestClient
+
+from app import main as main_module
 from app.main import app
+from app.terrain import generate_terrain
+
+
+def _install_test_site_terrains(monkeypatch):
+    terrains = {
+        "jezero": generate_terrain(seed=11, site_id="jezero", site_name="Jezero Crater"),
+        "gale": generate_terrain(seed=12, site_id="gale", site_name="Gale Crater"),
+    }
+    monkeypatch.setattr(main_module, "_terrain_for_site", terrains.__getitem__)
+    return terrains
 
 
 def test_api_health_catalog_and_science_routes():
@@ -44,8 +56,8 @@ def test_invalid_plan_constraints_return_validation_error_not_server_error():
     assert response.status_code == 422
 
 
-
-def test_each_mission_site_has_a_distinct_labeled_terrain_grid():
+def test_each_mission_site_has_a_distinct_labeled_test_terrain(monkeypatch):
+    _install_test_site_terrains(monkeypatch)
     with TestClient(app) as client:
         jezero = client.get("/api/terrain/jezero")
         gale = client.get("/api/terrain/gale")
@@ -60,11 +72,14 @@ def test_each_mission_site_has_a_distinct_labeled_terrain_grid():
     assert jezero.json()["id"] != gale.json()["id"]
     assert jezero.json()["elevation_m"] != gale.json()["elevation_m"]
     assert jezero.json()["status"] == "SIMULATED_NOT_GEOREFERENCED"
+    assert "synthetic teaching grid" in gale.json()["name"]
     assert gale.json()["coordinate_info"]["georeferenced"] is False
-    assert legacy.json()["site_id"] == "jezero"
+    assert legacy.status_code == 400
+    assert "Select one of the four supported mission sites" in legacy.json()["detail"]
 
 
-def test_routes_use_requested_mission_site():
+def test_routes_use_requested_mission_site(monkeypatch):
+    _install_test_site_terrains(monkeypatch)
     with TestClient(app) as client:
         response = client.post("/api/routes", json={
             "site_id": "gale",

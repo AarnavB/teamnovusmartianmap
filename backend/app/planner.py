@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import heapq
 import math
+from collections import deque
 from time import perf_counter
 from dataclasses import dataclass, field
 from typing import Any
@@ -240,6 +241,29 @@ class MultiObjectiveAStar:
         allowed_fraction = (1.0 - self.constraints.return_reserve_fraction) / 2.0
         return costs[1] <= allowed_fraction and costs[2] <= allowed_fraction and costs[8] <= allowed_fraction
 
+    def _hard_constraint_path_exists(self, start: tuple[int, int], goal: tuple[int, int]) -> bool:
+        """Check grid connectivity without resource limits to explain failed searches."""
+        queue = deque([start])
+        visited = {start}
+        while queue:
+            x, y = queue.popleft()
+            if (x, y) == goal:
+                return True
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+                nx, ny = x + dx, y + dy
+                point = (nx, ny)
+                if point in visited or self.terrain.is_blocked(nx, ny, self.constraints.max_slope_deg, self.constraints.max_temperature_c):
+                    continue
+                if dx and dy:
+                    if (
+                        self.terrain.is_blocked(nx, y, self.constraints.max_slope_deg, self.constraints.max_temperature_c)
+                        or self.terrain.is_blocked(x, ny, self.constraints.max_slope_deg, self.constraints.max_temperature_c)
+                    ):
+                        continue
+                visited.add(point)
+                queue.append(point)
+        return False
+
     def search(self, start: tuple[int, int], goal: tuple[int, int]) -> dict[str, Any]:
         t = self.terrain
         c = self.constraints
@@ -258,6 +282,7 @@ class MultiObjectiveAStar:
         goal_label: int | None = None
         self.expanded = 0
         self.generated = 1
+        self.resource_pruned = False
 
         while queue:
             _, _, label_id = heapq.heappop(queue)
@@ -306,7 +331,18 @@ class MultiObjectiveAStar:
                 heapq.heappush(queue, (priority, serial, new_id))
 
         if goal_label is None:
-            raise ValueError("No route satisfies the hard constraints and resource reserve")
+            if self._hard_constraint_path_exists(start, goal):
+                raise ValueError(
+                    "A terrain-valid path exists, but at least one EVA time budget, energy budget, or oxygen budget is too small "
+                    "after preserving the configured return reserve. Increase the corresponding resource "
+                    "budget or choose a closer destination. Changing objective-weight preferences does not "
+                    "override hard resource limits."
+                )
+            raise ValueError(
+                "The hard terrain constraints disconnect the selected start and destination. "
+                "Choose different map points or adjust the maximum-slope limit within the allowed range. "
+                "NoData cells and steep terrain remain blocked."
+            )
 
         path: list[tuple[int, int]] = []
         cursor: int | None = goal_label
@@ -420,6 +456,7 @@ def build_route_set(terrain: Terrain, start: tuple[int, int], goal: tuple[int, i
         "science_first": ("C", "SCIENCE-FIRST", "Use science layers only when real spatial science data are available"),
     }
     routes: list[dict[str, Any]] = []
+    profile_errors: list[str] = []
     # The three profiles search the same graph with different scalar weights.
     # Reuse edge vectors between them and cap the approximate Pareto frontier
     # at three labels per cell to reduce repeated work and memory use.
@@ -431,7 +468,11 @@ def build_route_set(terrain: Terrain, start: tuple[int, int], goal: tuple[int, i
             edge_cache=shared_edge_cache,
         )
         started = perf_counter()
-        search = model.search(start, goal)
+        try:
+            search = model.search(start, goal)
+        except ValueError as exc:
+            profile_errors.append(f"{profile}: {exc}")
+            continue
         search["runtime_ms"] = round((perf_counter() - started) * 1000.0, 2)
         search["edge_cache_hits"] = model.edge_cache_hits
         search["edge_cache_misses"] = model.edge_cache_misses
@@ -447,6 +488,10 @@ def build_route_set(terrain: Terrain, start: tuple[int, int], goal: tuple[int, i
             "search": {k: v for k, v in search.items() if k != "path"},
             "weights": model.weights,
         })
+    if not routes:
+        detail = profile_errors[0] if profile_errors else "No profile produced a feasible path."
+        raise ValueError(detail)
+
     for route in routes:
         route["is_pareto"] = not any(
             _route_dominates(other["metrics"], route["metrics"])

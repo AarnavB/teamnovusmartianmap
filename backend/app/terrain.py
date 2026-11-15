@@ -55,11 +55,19 @@ class Terrain:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        if self.status == "SIMULATED_NOT_GEOREFERENCED":
+            display_name = (
+                "Synthetic Martian teaching tile"
+                if self.site_id == "demo"
+                else f"{self.site_name} — synthetic teaching grid"
+            )
+        else:
+            display_name = f"{self.site_name} — imported Mars DEM route grid"
         return {
             "id": self.terrain_id,
             "site_id": self.site_id,
             "site_name": self.site_name,
-            "name": f"{self.site_name} — imported Mars DEM route grid",
+            "name": display_name,
             "status": self.status,
             "warning": self.warning,
             "width": self.width,

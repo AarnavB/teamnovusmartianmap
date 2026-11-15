@@ -26,7 +26,7 @@ from ..terrain import Terrain
 logger = logging.getLogger(__name__)
 
 MAX_DEM_DOWNLOAD_BYTES = 400 * 1024 * 1024
-CACHE_FORMAT_VERSION = 1
+CACHE_FORMAT_VERSION = 2
 USER_AGENT = "MARSCOPE/0.4.0 (research prototype; catalogued Mars DEM fetcher)"
 DEFAULT_CACHE_ROOT = Path(__file__).resolve().parents[1] / "data" / "automatic_dems"
 
@@ -374,6 +374,8 @@ def load_or_fetch_site_terrain(site_id: str, site: dict[str, Any]) -> Terrain:
             width=96,
             height=96,
             vertical_units=str(site["dem"].get("vertical_units", "m")),
+            window_center_xy_m=tuple(coverage["projected_reference_xy_m"]),
+            window_size_m=2400.0,
         )
     except (ValueError, RuntimeError, OSError) as exc:
         raise DemValidationError(
