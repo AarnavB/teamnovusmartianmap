@@ -12,7 +12,7 @@ const INITIAL_GOAL: Point = { x: 59, y: 56 };
 const EMPTY_PATH: Point[] = [];
 
 const layerNames: { id: Layer; name: string; unit: string }[] = [
-  { id: 'elevation', name: 'Elevation', unit: 'm / fixture-relative when simulated' },
+  { id: 'elevation', name: 'Elevation', unit: 'metres · imported planetary DEM' },
   { id: 'slope', name: 'Slope', unit: 'degrees' },
   { id: 'roughness', name: 'Roughness', unit: 'normalized local relief' },
   { id: 'regolith', name: 'Regolith mobility', unit: '0–1 user-defined index' },
@@ -294,7 +294,7 @@ export default function App() {
   const hasSlope = (terrain?.available_layers ?? []).includes('slope');
   const hasUncertainty = (terrain?.available_layers ?? []).includes('uncertainty');
   const upcomingMaxSlope = hasSlope && upcomingCells.length ? Math.max(...upcomingCells.map((point) => terrain!.slope_deg[point.y][point.x])) : null;
-  const upcomingMaxUncertainty = hasUncertainty && upcomingCells.length ? Math.max(...upcomingCells.map((point) => terrain!.uncertainty[point.y][point.x])) : null;
+  const upcomingMaxUncertainty = hasUncertainty && upcomingCells.length ? Math.max(...upcomingCells.map((point) => (terrain!.uncertainty?.[point.y]?.[point.x] ?? 0))) : null;
   const terrainWarnings = [
     !hasSlope ? 'Slope layer unavailable. Upcoming terrain inclination cannot be assessed.' : null,
     upcomingMaxSlope !== null && upcomingMaxSlope >= maxSlope * 0.8 ? `Upcoming slope approaches the configured limit (${upcomingMaxSlope.toFixed(1)}° / ${maxSlope.toFixed(1)}°).` : null,
@@ -334,7 +334,7 @@ export default function App() {
 
       <main className="workspace">
         <section className="left-rail">
-          <div className="rail-head"><span className="eyebrow">MISSION AREA</span><span className="live-chip">{terrainLoading ? 'LOADING' : terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'SIMULATION' : terrain ? 'IMPORTED DEM' : 'NO TERRAIN'}</span></div>
+          <div className="rail-head"><span className="eyebrow">MISSION AREA</span><span className="live-chip">{terrainLoading ? 'LOADING' : terrain ? 'REAL DEM' : 'NO REAL DEM'}</span></div>
           <div className="location-card mission-site-card">
             <div className="planet-glyph">♂</div>
             <div className="location-copy mission-site-copy">
@@ -364,9 +364,9 @@ export default function App() {
           <div className="section-kicker">MISSION PLANNING</div>
           <div className="field-stack">
             <div className="field-label"><span>01 / START POINT</span><button className={`tiny-action ${pickMode === 'start' ? 'active' : ''}`} onClick={() => setPickMode(pickMode === 'start' ? null : 'start')}>PICK ON MAP</button></div>
-            <div className="coord-card"><span className="point-symbol start-symbol">A</span><div><b>{pointText(start)}</b><small>Grid reference · synthetic tile</small></div></div>
+            <div className="coord-card"><span className="point-symbol start-symbol">A</span><div><b>{pointText(start)}</b><small>Grid reference · imported DEM</small></div></div>
             <div className="field-label"><span>02 / DESTINATION</span><button className={`tiny-action ${pickMode === 'goal' ? 'active' : ''}`} onClick={() => setPickMode(pickMode === 'goal' ? null : 'goal')}>PICK ON MAP</button></div>
-            <div className="coord-card"><span className="point-symbol goal-symbol">B</span><div><b>{pointText(goal)}</b><small>Grid reference · synthetic tile</small></div></div>
+            <div className="coord-card"><span className="point-symbol goal-symbol">B</span><div><b>{pointText(goal)}</b><small>Grid reference · imported DEM</small></div></div>
             {pickMode && <div className="pick-hint">Click a location on the terrain to set the {pickMode === 'start' ? 'start point' : 'destination'}.</div>}
           </div>
 
@@ -402,7 +402,7 @@ export default function App() {
             {terrain && terrain.site_id === selectedMissionSiteId && <TerrainScene key={terrain.id} terrain={terrain} routes={routes} selectedRoute={selectedRoute} start={start} goal={goal} obstacles={addedObstacles} layer={layer} viewMode={viewMode} pickMode={pickMode} evaPosition={evaMode ? evaPosition : null} returnPath={evaMode ? returnPath : EMPTY_PATH} onPick={handlePick} />}
             {terrainLoading && <div className="terrain-loading-state"><span className="spinner" /> LOADING {selectedMissionSite.region.toUpperCase()} TERRAIN</div>}
             {!terrain && !terrainLoading && <div className="terrain-loading-state terrain-error-state"><b>TERRAIN UNAVAILABLE</b><span>{error || `Could not load a terrain grid for ${selectedMissionSite.region}.`}</span></div>}
-            <div className="scene-top-left"><span className="scene-tag"><i /> TERRAIN MODEL</span><span className="scene-tag muted">{terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'SYNTHETIC / NOT GEOREFERENCED' : 'IMPORTED GEOTIFF / VERIFY PROVENANCE'}</span></div>
+            <div className="scene-top-left"><span className="scene-tag"><i /> TERRAIN MODEL</span><span className="scene-tag muted">{'IMPORTED / GEOREFERENCED DEM'}</span></div>
             <div className="scene-top-right"><span className="compass">N</span><span className="compass-line" /></div>
             <div className="scene-bottom-left"><span>GRID CELL <b>{terrain?.cell_size_m?.toFixed(1) ?? '8.0'} m</b></span><span className="scene-vertical-note">VERTICAL EXAGGERATION <b>5×</b></span></div>
             <div className="scene-bottom-right"><span className="view-caption">{viewMode === '3D' ? 'OBLIQUE VIEW' : 'PLAN VIEW'}</span><span className="zoom-hint">DRAG TO ORBIT · SCROLL TO ZOOM</span></div>
@@ -412,7 +412,7 @@ export default function App() {
           <div className="layer-strip">
             <div className="layer-title"><span className="eyebrow">MAP LAYERS</span><span className="layer-count">{layerNames.filter((entry) => { const key: Record<Layer, string> = { elevation: 'elevation', slope: 'slope', roughness: 'roughness', regolith: 'regolith', temperature: 'temperature', environment: 'atmosphere', radiation: 'radiation', uncertainty: 'uncertainty', science: 'science' }; return (terrain?.available_layers ?? []).includes(key[entry.id]); }).length} AVAILABLE</span></div>
             <div className="layer-buttons">{layerNames.filter((entry) => { const key: Record<Layer, string> = { elevation: 'elevation', slope: 'slope', roughness: 'roughness', regolith: 'regolith', temperature: 'temperature', environment: 'atmosphere', radiation: 'radiation', uncertainty: 'uncertainty', science: 'science' }; return (terrain?.available_layers ?? []).includes(key[entry.id]); }).map((entry) => <button key={entry.id} className={layer === entry.id ? 'layer-button active' : 'layer-button'} onClick={() => setLayer(entry.id)}><span className={`layer-swatch swatch-${entry.id}`} />{entry.name}</button>)}</div>
-            <div className="layer-metadata"><span>SOURCE <b>{terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'Synthetic fixture' : 'Imported DEM'}</b></span><span>DATE <b>{terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'Not an observation' : 'See provenance'}</b></span><span>GRID SPACING <b>{terrain?.cell_size_m ?? 8} m</b></span><span>LAYERS <b>{(terrain?.available_layers ?? []).join(', ') || 'Unspecified'}</b></span></div>
+            <div className="layer-metadata"><span>SOURCE <b>{'Imported planetary DEM'}</b></span><span>DATE <b>{'Source product metadata'}</b></span><span>GRID SPACING <b>{terrain?.cell_size_m ?? 8} m</b></span><span>LAYERS <b>{(terrain?.available_layers ?? []).join(', ') || 'Unspecified'}</b></span></div>
           </div>
 
           {evaMode ? (
@@ -424,7 +424,7 @@ export default function App() {
                 <button onClick={() => setEvaProgressIndex(0)} disabled={evaIndex === 0}>RESET TO START</button>
               </div>
               <div className="eva-grid">
-                <div className="eva-stat"><span>CURRENT POSITION</span><strong>{pointText(evaPosition)}</strong><small>{terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'Synthetic grid position' : 'Imported DEM grid coordinate'}</small></div>
+                <div className="eva-stat"><span>CURRENT POSITION</span><strong>{pointText(evaPosition)}</strong><small>{'Imported DEM grid coordinate'}</small></div>
                 <div className="eva-stat"><span>NEXT ROUTE WAYPOINT</span><strong>{nextWaypoint ? pointText(nextWaypoint) : 'DESTINATION REACHED'}</strong><small>{nextWaypoint ? `${(Math.hypot(nextWaypoint.x - evaPosition.x, nextWaypoint.y - evaPosition.y) * cellSizeM).toFixed(1)} m · ${gridHeading(evaPosition, nextWaypoint)}` : 'No forward waypoint remains'}</small></div>
                 <div className="eva-stat"><span>REMAINING OUTBOUND</span><strong>{remainingDistanceM.toFixed(1)} m</strong><small>{remainingOutboundMin.toFixed(1)} min model estimate</small></div>
                 <div className="eva-stat"><span>RETURN TRACE TO BASE</span><strong>{returnDistanceM.toFixed(1)} m</strong><small>{pointText(evaPosition)} → {pointText(start)} · dashed on map</small></div>
@@ -444,7 +444,7 @@ export default function App() {
             </div>
           ) : (
             <div className="route-section">
-              <div className="section-heading"><div><span className="eyebrow">PATHFINDING ENGINE</span><h2>Route alternatives <span className="count-pill">{routes.length}</span></h2></div><div className="route-actions"><button className="text-action" onClick={() => void runBenchmark()} disabled={benchmarking || planning}>{benchmarking ? 'COMPARING…' : 'COMPARE BASELINES'}</button><button className="text-action" onClick={() => void injectObstacle()} disabled={!plan || replanning || !routes.length}>{replanning ? 'REPAIRING GRAPH…' : '＋ SIMULATE OBSTACLE'}</button><button className="text-action" onClick={() => void injectConditionUpdate()} disabled={!plan || replanning || !routes.length}>{replanning ? 'REPAIRING GRAPH…' : 'SIMULATE CONDITION UPDATE'}</button></div></div>
+              <div className="section-heading"><div><span className="eyebrow">PATHFINDING ENGINE</span><h2>Route alternatives <span className="count-pill">{routes.length}</span></h2>{plan?.planning_runtime_ms !== undefined && <small>Planner compute: {plan.planning_runtime_ms.toFixed(1)} ms</small>}</div><div className="route-actions"><button className="text-action" onClick={() => void runBenchmark()} disabled={benchmarking || planning}>{benchmarking ? 'COMPARING…' : 'COMPARE BASELINES'}</button><button className="text-action" onClick={() => void injectObstacle()} disabled={!plan || replanning || !routes.length}>{replanning ? 'REPAIRING GRAPH…' : '＋ SIMULATE OBSTACLE'}</button><button className="text-action" onClick={() => void injectConditionUpdate()} disabled={!plan || replanning || !routes.length}>{replanning ? 'REPAIRING GRAPH…' : 'SIMULATE CONDITION UPDATE'}</button></div></div>
               <div className="route-cards">
                 {routes.map((route) => <button key={route.id} className={`route-card ${selectedRoute === route.id ? 'selected' : ''}`} onClick={() => setSelectedRoute(route.id)}>
                   <div className="route-card-top"><span className={`route-letter route-${route.id}`}>{route.id}</span><span className="route-status">{route.is_pareto ? 'PARETO' : 'ALTERNATIVE'}</span></div>
@@ -453,9 +453,9 @@ export default function App() {
                 </button>)}
               </div>
               {benchmarkResults.length > 0 && <div className="benchmark-strip">
-                <div className="benchmark-head"><b>BASELINE COMPARISON</b><small>Same synthetic grid · balanced scalar cost for A* and Dijkstra</small></div>
+                <div className="benchmark-head"><b>BASELINE COMPARISON</b><small>Same imported DEM · balanced scalar cost for A* and Dijkstra</small></div>
                 {benchmarkResults.map((result) => <div className="benchmark-row" key={result.algorithm}><span>{result.algorithm.replace('_', ' ').toUpperCase()}</span><b>{result.distance_m.toFixed(0)} m</b><b>{result.runtime_ms.toFixed(2)} ms</b><small>{result.expanded_nodes.toLocaleString()} expanded</small></div>)}
-                <small className="benchmark-warning">Synthetic-fixture timings only; not a claim of field or orbital-data performance.</small>
+                <small className="benchmark-warning">Runtime comparison on the imported DEM; not field-navigation validation.</small>
               </div>}
               {replanResult && <div className="repair-banner"><span className="repair-icon">↻</span><div><b>Incremental route repair complete</b><small>LPA* updated the selected route after a simulated obstacle. {replanResult.expanded_during_repair} nodes expanded during repair.</small></div><button onClick={() => setReplanResult(null)}>×</button></div>}
               {conditionNotice && <div className="repair-banner"><span className="repair-icon">↻</span><div><b>Condition update processed</b><small>{conditionNotice}</small></div><button onClick={() => setConditionNotice('')}>×</button></div>}
@@ -477,7 +477,7 @@ export default function App() {
               <MetricBar label="Scientific value" value={selected.metrics.scientific_value_pct} color="green" />
             </div>
             <div className="resource-block"><div className="resource-heading"><span className="eyebrow">RESOURCE MODEL</span><span className={`feasibility ${selected.metrics.return_feasible ? 'pass' : 'fail'}`}>{selected.metrics.return_feasible ? 'RETURN FEASIBLE' : 'LIMIT EXCEEDED'}</span></div><div className="resource-row"><span>Estimated energy</span><b>{selected.metrics.energy_wh.toFixed(1)} Wh</b></div><div className="resource-row"><span>Out-and-back time</span><b>{selected.metrics.return_time_estimate_min.toFixed(1)} min</b></div><div className="resource-row"><span>Out-and-back energy</span><b>{selected.metrics.return_energy_estimate_wh.toFixed(1)} Wh</b></div><div className="resource-row"><span>Outbound oxygen estimate</span><b>{selected.metrics.oxygen_l?.toFixed(1) ?? 'N/A'} L</b></div><div className="resource-row"><span>Out-and-back oxygen estimate</span><b>{selected.metrics.return_oxygen_l?.toFixed(1) ?? 'N/A'} L</b></div></div>
-            <div className="algorithm-card"><div className="algorithm-head"><span className="algorithm-icon">ƒ</span><div><b>HYBRID MULTI-OBJECTIVE A*</b><small>Bounded Pareto label search</small></div></div><div className="algorithm-stats"><div><b>{selected.search.expanded_nodes.toLocaleString()}</b><small>Expanded</small></div><div><b>{selected.search.generated_labels.toLocaleString()}</b><small>Labels</small></div><div><b>{selected.search.pareto_labels_at_goal}</b><small>Goal labels</small></div></div></div>
+            <div className="algorithm-card"><div className="algorithm-head"><span className="algorithm-icon">ƒ</span><div><b>HYBRID MULTI-OBJECTIVE A*</b><small>Bounded Pareto label search</small></div></div><div className="algorithm-stats"><div><b>{selected.search.expanded_nodes.toLocaleString()}</b><small>Expanded</small></div><div><b>{selected.search.generated_labels.toLocaleString()}</b><small>Labels</small></div><div><b>{selected.search.pareto_labels_at_goal}</b><small>Goal labels</small></div></div>{selected.search.runtime_ms !== undefined && <small className="algorithm-runtime">Profile: {selected.search.runtime_ms.toFixed(1)} ms · edge-cache hits: {(selected.search.edge_cache_hits ?? 0).toLocaleString()}</small>}</div>
             <p className="metric-foot">{selected.metrics.model_note}</p>
           </div>}
 
@@ -486,7 +486,7 @@ export default function App() {
           {activeTab === 'data' && <DataExplorer missionSite={selectedMissionSite} sources={datasets} planId={plan?.plan_id} onTerrainImported={(nextTerrain) => { if (nextTerrain.site_id !== selectedMissionSiteId) { setError('The imported terrain belongs to a different mission site.'); return; } setTerrain(nextTerrain); setPlan(null); setRoutes([]); setBenchmarkResults([]); setError(''); setConditionNotice(''); setLayer('elevation'); const nextStart = { x: 4, y: 5 }; const nextGoal = { x: nextTerrain.width - 5, y: nextTerrain.height - 8 }; setStart(nextStart); setGoal(nextGoal); }} />}
         </aside>
       </main>
-      <footer className="app-footer"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain?.status === 'SIMULATED_NOT_GEOREFERENCED' ? 'SYNTHETIC DEMONSTRATION TILE' : 'IMPORTED DEM + UNKNOWN AUXILIARY LAYERS'}</span><span>NOT FOR OPERATIONAL USE</span></footer>
+      <footer className="app-footer"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain ? 'IMPORTED MARS DEM · SOURCE HASHED' : 'NO REAL DEM LOADED'}</span><span>NOT FOR OPERATIONAL USE</span></footer>
     </div>
   );
 }
