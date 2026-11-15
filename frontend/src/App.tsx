@@ -131,8 +131,7 @@ export default function App() {
       })
       .catch((err: Error) => {
         if (!alive) return;
-        setError(`Could not load terrain for ${siteId}: ${err.message}`);
-        setStatus('OFFLINE');
+        setError(`No route-ready terrain for ${siteId}: ${err.message}`);
       })
       .finally(() => alive && setTerrainLoading(false));
 
@@ -444,7 +443,7 @@ export default function App() {
             </div>
           ) : (
             <div className="route-section">
-              <div className="section-heading"><div><span className="eyebrow">PATHFINDING ENGINE</span><h2>Route alternatives <span className="count-pill">{routes.length}</span></h2>{plan?.planning_runtime_ms !== undefined && <small>Planner compute: {plan.planning_runtime_ms.toFixed(1)} ms</small>}</div><div className="route-actions"><button className="text-action" onClick={() => void runBenchmark()} disabled={benchmarking || planning}>{benchmarking ? 'COMPARING…' : 'COMPARE BASELINES'}</button><button className="text-action" onClick={() => void injectObstacle()} disabled={!plan || replanning || !routes.length}>{replanning ? 'REPAIRING GRAPH…' : '＋ SIMULATE OBSTACLE'}</button><button className="text-action" onClick={() => void injectConditionUpdate()} disabled={!plan || replanning || !routes.length}>{replanning ? 'REPAIRING GRAPH…' : 'SIMULATE CONDITION UPDATE'}</button></div></div>
+              <div className="section-heading"><div><span className="eyebrow">PATHFINDING ENGINE</span><h2>Route alternatives <span className="count-pill">{routes.length}</span></h2>{plan?.planning_runtime_ms !== undefined && <small>Planner compute: {plan.planning_runtime_ms.toFixed(1)} ms</small>}</div><div className="route-actions"><button className="text-action" onClick={() => void runBenchmark()} disabled={!terrain || benchmarking || planning}>{benchmarking ? 'COMPARING…' : 'COMPARE BASELINES'}</button></div></div>
               <div className="route-cards">
                 {routes.map((route) => <button key={route.id} className={`route-card ${selectedRoute === route.id ? 'selected' : ''}`} onClick={() => setSelectedRoute(route.id)}>
                   <div className="route-card-top"><span className={`route-letter route-${route.id}`}>{route.id}</span><span className="route-status">{route.is_pareto ? 'PARETO' : 'ALTERNATIVE'}</span></div>
@@ -457,8 +456,6 @@ export default function App() {
                 {benchmarkResults.map((result) => <div className="benchmark-row" key={result.algorithm}><span>{result.algorithm.replace('_', ' ').toUpperCase()}</span><b>{result.distance_m.toFixed(0)} m</b><b>{result.runtime_ms.toFixed(2)} ms</b><small>{result.expanded_nodes.toLocaleString()} expanded</small></div>)}
                 <small className="benchmark-warning">Runtime comparison on the imported DEM; not field-navigation validation.</small>
               </div>}
-              {replanResult && <div className="repair-banner"><span className="repair-icon">↻</span><div><b>Incremental route repair complete</b><small>LPA* updated the selected route after a simulated obstacle. {replanResult.expanded_during_repair} nodes expanded during repair.</small></div><button onClick={() => setReplanResult(null)}>×</button></div>}
-              {conditionNotice && <div className="repair-banner"><span className="repair-icon">↻</span><div><b>Condition update processed</b><small>{conditionNotice}</small></div><button onClick={() => setConditionNotice('')}>×</button></div>}
               {error && <div className="error-banner"><span>!</span>{error}</div>}
             </div>
           )}
