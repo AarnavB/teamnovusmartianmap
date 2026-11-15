@@ -480,7 +480,7 @@ export default function App() {
 
           {activeTab === 'science' && <ScienceAssistant missionSite={selectedMissionSite} />}
 
-          {activeTab === 'data' && <DataExplorer missionSite={selectedMissionSite} sources={datasets} planId={plan?.plan_id} onTerrainImported={(nextTerrain) => { if (nextTerrain.site_id !== selectedMissionSiteId) { setError('The imported terrain belongs to a different mission site.'); return; } setTerrain(nextTerrain); setPlan(null); setRoutes([]); setBenchmarkResults([]); setError(''); setConditionNotice(''); setLayer('elevation'); const nextStart = { x: 4, y: 5 }; const nextGoal = { x: nextTerrain.width - 5, y: nextTerrain.height - 8 }; setStart(nextStart); setGoal(nextGoal); }} />}
+          {activeTab === 'data' && <DataExplorer missionSite={selectedMissionSite} terrainLoaded={Boolean(terrain && terrain.site_id === selectedMissionSiteId)} sources={datasets} planId={plan?.plan_id} onTerrainImported={(nextTerrain) => { if (nextTerrain.site_id !== selectedMissionSiteId) { setError('The imported terrain belongs to a different mission site.'); return; } setTerrain(nextTerrain); setPlan(null); setRoutes([]); setBenchmarkResults([]); setError(''); setConditionNotice(''); setLayer('elevation'); const nextStart = { x: 4, y: 5 }; const nextGoal = { x: nextTerrain.width - 5, y: nextTerrain.height - 8 }; setStart(nextStart); setGoal(nextGoal); }} />}
         </aside>
       </main>
       <footer className="app-footer"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain ? 'IMPORTED MARS DEM · SOURCE HASHED' : 'NO REAL DEM LOADED'}</span><span>NOT FOR OPERATIONAL USE</span></footer>
