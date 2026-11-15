@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import type {
   JevEvidenceAssessmentResponse,
@@ -49,6 +49,7 @@ export default function DecisionCenter({
 }: DecisionCenterProps) {
   const orderedJudgements = decision?.judgements ?? [];
 
+  // Declare all state before deriving values from it.
   const [jevStatus, setJevStatus] = useState<JevStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState('');
@@ -62,7 +63,7 @@ export default function DecisionCenter({
   const [evidenceResult, setEvidenceResult] =
     useState<JevEvidenceAssessmentResponse | null>(null);
 
-  const refreshJevStatus = async () => {
+  const refreshJevStatus = useCallback(async () => {
     setStatusLoading(true);
     setStatusError('');
 
@@ -71,17 +72,19 @@ export default function DecisionCenter({
       setJevStatus(result);
     } catch (err) {
       setStatusError(
-        err instanceof Error ? err.message : 'Unable to retrieve JEV service status.',
+        err instanceof Error
+          ? err.message
+          : 'Unable to retrieve JEV service status.',
       );
       setJevStatus(null);
     } finally {
       setStatusLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void refreshJevStatus();
-  }, []);
+  }, [refreshJevStatus]);
 
   const statusLabel = error
     ? 'SERVICE_ERROR'
@@ -145,7 +148,9 @@ export default function DecisionCenter({
     } catch (err) {
       setEvidenceResult(null);
       setEvidenceError(
-        err instanceof Error ? err.message : 'JEV evidence assessment failed.',
+        err instanceof Error
+          ? err.message
+          : 'JEV evidence assessment failed.',
       );
     } finally {
       setEvidenceLoading(false);
@@ -213,7 +218,9 @@ export default function DecisionCenter({
               <span>CONFIGURATION</span>
               <b>
                 {jevStatus
-                  ? jevStatus.configured ? 'CONFIGURED' : 'NOT CONFIGURED'
+                  ? jevStatus.configured
+                    ? 'CONFIGURED'
+                    : 'NOT CONFIGURED'
                   : 'UNKNOWN'}
               </b>
             </div>
