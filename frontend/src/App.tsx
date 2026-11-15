@@ -368,7 +368,7 @@ export default function App() {
             <div className="mission-site-focus"><b>{selectedMissionSite.focusLabel}</b><span>{selectedMissionSite.focus}</span></div>
             <a href={selectedMissionSite.coordinateSourceUrl} target="_blank" rel="noreferrer">{selectedMissionSite.coordinateSource} ↗</a>
           </div>
-          <p className="mission-site-warning">{terrain?.site_id === selectedMissionSiteId ? terrain.warning : terrainLoading ? `Loading the ${selectedMissionSite.region} terrain grid…` : error || 'Terrain data is unavailable for this mission site.'}</p>
+          <p className="mission-site-warning">{terrain?.site_id === selectedMissionSiteId ? terrain.warning : terrainLoading ? `Fetching or loading the official ${selectedMissionSite.region} DEM…` : error || 'Terrain data is unavailable for this mission site.'}</p>
           <div className="section-kicker">MISSION PLANNING</div>
           <div className="field-stack">
             <div className="field-label"><span>01 / START POINT</span><button className={`tiny-action ${pickMode === 'start' ? 'active' : ''}`} onClick={() => setPickMode(pickMode === 'start' ? null : 'start')}>PICK ON MAP</button></div>
