@@ -26,7 +26,7 @@ from ..terrain import Terrain
 logger = logging.getLogger(__name__)
 
 MAX_DEM_DOWNLOAD_BYTES = 400 * 1024 * 1024
-CACHE_FORMAT_VERSION = 1
+CACHE_FORMAT_VERSION = 2
 USER_AGENT = "MARSCOPE/0.4.0 (research prototype; catalogued Mars DEM fetcher)"
 DEFAULT_CACHE_ROOT = Path(__file__).resolve().parents[1] / "data" / "automatic_dems"
 
