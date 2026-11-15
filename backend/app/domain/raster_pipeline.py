@@ -325,6 +325,8 @@ def import_aligned_layer(path: Path, terrain: Any, *, layer: str, value_min: flo
         terrain.available_layers.add("radiation")
     elif layer == "science_potential":
         terrain.available_layers.add("science")
+    elif layer == "uncertainty":
+        terrain.available_layers.add("uncertainty")
     elif layer == "regolith":
         terrain.available_layers.add("regolith")
     metadata["coverage_valid_fraction"] = round(valid_fraction, 6)
