@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
-import type { JevEvidenceAssessmentResponse, JevPathfindingWeights, JevProvider } from '../types';
+import type { JevEvidenceAssessmentResponse, JevPathfindingWeights, JevProvider, JevStatus } from '../types';
 
 type DecisionCenterProps = {
   siteName: string;
@@ -42,6 +42,8 @@ export default function DecisionCenter({
   onForgetKey,
 }: DecisionCenterProps) {
   const orderedJudgements = decision?.judgements ?? [];
+  const statusState: 'CONNECTED' | 'EVALUATING' | 'ADAPTIVE_WEIGHTS_APPLIED' | 'STATIC_FALLBACK' | 'SERVICE_ERROR' =
+    error ? 'SERVICE_ERROR' : loading ? 'EVALUATING' : applied ? 'ADAPTIVE_WEIGHTS_APPLIED' : jevStatus?.reachable ? 'CONNECTED' : 'STATIC_FALLBACK';
   const [evidenceHypothesis, setEvidenceHypothesis] = useState('');
   const [evidenceTitle, setEvidenceTitle] = useState('');
   const [evidenceSummary, setEvidenceSummary] = useState('');
@@ -49,6 +51,19 @@ export default function DecisionCenter({
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [evidenceError, setEvidenceError] = useState('');
   const [evidenceResult, setEvidenceResult] = useState<JevEvidenceAssessmentResponse | null>(null);
+  const [jevStatus, setJevStatus] = useState<JevStatus | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const refreshStatus = async () => {
+    setStatusLoading(true);
+    try {
+      setJevStatus(await api.jevStatus());
+    } catch {
+      setJevStatus(null);
+    } finally {
+      setStatusLoading(false);
+    }
+  };
+  useEffect(() => { void refreshStatus(); }, []);
 
   const reviewEvidence = async () => {
     if (!apiKey.trim() || !missionPrompt.trim() || !evidenceHypothesis.trim()
@@ -97,7 +112,7 @@ export default function DecisionCenter({
             <p>JEV translates your mission objective into a transparent preference vector for Route B. Terrain facts and mission feasibility remain controlled by MARSCOPE.</p>
           </div>
           <span className={applied ? 'jev-status is-active' : 'jev-status'}>
-            {applied ? 'ADAPTIVE VECTOR APPLIED' : 'STATIC BASELINE ACTIVE'}
+            {statusState.replace(/_/g, ' ')}
           </span>
         </div>
         <div className="jev-context-grid">
@@ -105,6 +120,15 @@ export default function DecisionCenter({
           <div><span>SITE ID</span><b>{siteId}</b></div>
           <div><span>VERIFIED TERRAIN</span><b>{hasTerrain ? 'AVAILABLE' : 'NOT READY'}</b></div>
           <div><span>AVAILABLE LAYERS</span><b>{availableLayers.length}</b></div>
+        </div>
+        <div className="jev-status-row" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '11px', marginTop: '8px', opacity: 0.85 }}>
+          <span><b>JEV SVC:</b> {jevStatus?.reachable ? 'REACHABLE' : jevStatus?.configured ? 'CONFIGURED · NOT REACHABLE' : 'NOT CONFIGURED'}</span>
+          <span><b>LAST OK:</b> {jevStatus?.last_success?.timestamp_utc ?? '—'}</span>
+          <span><b>MODEL:</b> {jevStatus?.last_success?.model ?? '—'}</span>
+          <span><b>CORRELATION:</b> {jevStatus?.last_success?.correlation_id ? jevStatus.last_success.correlation_id.slice(0, 8) : '—'}</span>
+          <button type="button" onClick={() => void refreshStatus()} disabled={statusLoading} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>
+            {statusLoading ? 'CHECKING…' : 'REFRESH STATUS'}
+          </button>
         </div>
         <p className="jev-layer-list">{availableLayers.length ? availableLayers.join(' · ').toUpperCase() : 'Load a verified site DEM to inspect available terrain layers.'}</p>
       </section>
