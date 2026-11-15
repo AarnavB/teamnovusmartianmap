@@ -154,6 +154,16 @@ def test_json_503_provider_failure_is_retried_once(monkeypatch):
     assert len(FakeClient.instances) == 2
 
 
+def test_json_503_service_auth_configuration_is_not_retried(monkeypatch):
+    _set_configured(monkeypatch)
+    FakeClient.responses = [FakeResponse(503, {"detail": "JEV service authentication is not configured."})]
+    with pytest.raises(HTTPException) as exc_info:
+        _run(jev_client.request_jev_pathfinding_weights({"apiKey": "k"}))
+    assert exc_info.value.status_code == 503
+    assert "authentication is not configured" in exc_info.value.detail
+    assert len(FakeClient.instances) == 1
+
+
 def test_json_429_rate_limit_is_not_retried(monkeypatch):
     _set_configured(monkeypatch)
     FakeClient.responses = [FakeResponse(429, {"detail": "Provider rate limit reached."})]
