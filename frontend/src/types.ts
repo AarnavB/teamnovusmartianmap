@@ -302,3 +302,21 @@ export type RouteReportResponse = {
   report_markdown: string;
   report_json: Record<string, unknown>;
 };
+
+export type JevStatus = {
+  configured: boolean;
+  service_url: string | null;
+  token_configured: boolean;
+  reachable: boolean;
+  reachability: { configured?: boolean; reachable?: boolean; status_code?: number; reason?: string };
+  last_success: {
+    available: boolean;
+    timestamp_utc: string | null;
+    endpoint: string | null;
+    model: string | null;
+    provider: string | null;
+    policy_version: string | null;
+    correlation_id: string | null;
+  };
+};
+
