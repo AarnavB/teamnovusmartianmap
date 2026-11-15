@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import TerrainScene from './components/TerrainScene';
+import ScientificTerrainInspector from './components/ScientificTerrainInspector';
 import DataExplorer from './components/DataExplorer';
 import DecisionCenter from './components/DecisionCenter';
 import RouteProfileChart from './components/RouteProfileChart';
@@ -82,8 +83,9 @@ export default function App() {
   const [layer, setLayer] = useState<Layer>('elevation');
   const [viewMode, setViewMode] = useState<'3D' | '2D'>('3D');
   const [pickMode, setPickMode] = useState<'start' | 'goal' | 'waypoint' | null>(null);
+  const [inspectedCell, setInspectedCell] = useState<Point | null>(null);
   const [evaMode, setEvaMode] = useState(false);
-  const [activeTab, setActiveTab] = useState<'planner' | 'jev' | 'science'>('planner');
+  const [activeTab, setActiveTab] = useState<'planner' | 'jev' | 'science' | 'inspect'>('planner');
   const [dataMenuOpen, setDataMenuOpen] = useState(false);
   const [workspaceEntered, setWorkspaceEntered] = useState(false);
   const [tourStep, setTourStep] = useState<number | null>(null);
@@ -223,6 +225,8 @@ export default function App() {
     activeMissionSiteIdRef.current = siteId;
     setTerrainLoading(true);
     setTerrain(null);
+    setInspectedCell(null);
+    setActiveTab('planner');
     setPlan(null);
     setRoutes([]);
     setWaypoints([]);
@@ -403,6 +407,12 @@ export default function App() {
     setMissionEvents([]);
     setSelectedMissionSiteId(siteId);
   };
+
+  const handleInspect = useCallback((point: Point) => {
+    if (!terrain || !isVerifiedRealTerrain(terrain, selectedMissionSiteId)) return;
+    setInspectedCell(point);
+    setActiveTab('inspect');
+  }, [terrain, selectedMissionSiteId]);
 
   const handlePick = useCallback((point: Point) => {
     if (!terrain) return;
@@ -806,6 +816,8 @@ export default function App() {
                 evaPosition={evaMode ? evaPosition : null}
                 returnPath={evaMode ? returnPath : EMPTY_PATH}
                 onPick={handlePick}
+                onInspect={handleInspect}
+                selectedCell={inspectedCell}
                 hazardOverlay={hazardOverlay}
                 maxSlopeDeg={maxSlope}
                 waypoints={waypoints}
@@ -815,6 +827,7 @@ export default function App() {
                 selectedScientificTargetIds={selectedScienceTargetIds}
               />
             )}
+            {terrain && <div className="inspector-map-hint"><span className="inspector-crosshair">⌖</span> CLICK TERRAIN TO INSPECT</div>}
             {terrainLoading && <div className="terrain-loading-state"><span className="spinner" /> LOADING {selectedMissionSite.region.toUpperCase()} TERRAIN</div>}
             {!terrain && !terrainLoading && <div className="terrain-loading-state terrain-error-state"><b>TERRAIN UNAVAILABLE</b><span>{error || `Could not load a terrain grid for ${selectedMissionSite.region}.`}</span></div>}
             <div className="scene-top-left"><span className="scene-tag"><i /> TERRAIN MODEL</span><span className="scene-tag muted">{'IMPORTED / GEOREFERENCED DEM'}</span></div>
@@ -1072,6 +1085,7 @@ export default function App() {
         <aside className="right-rail min-w-0">
           <div className="right-tabs">
             <button className={activeTab === 'planner' ? 'active' : ''} onClick={() => setActiveTab('planner')}>ANALYTICS</button>
+            <button className={activeTab === 'inspect' ? 'active' : ''} onClick={() => setActiveTab('inspect')} title="Inspect a selected terrain cell">INSPECT</button>
             <button className={activeTab === 'science' ? 'active' : ''} data-tour-active={tourStep === 5 || undefined} onClick={() => setActiveTab('science')}>SCIENCE</button>
             <button className={activeTab === 'jev' ? 'active' : ''} data-tour-active={tourStep === 4 || undefined} onClick={() => setActiveTab('jev')}>JEV INTEL</button>
             <button className={`data-launch ${dataMenuOpen ? 'active' : ''}`} onClick={() => setDataMenuOpen(true)} aria-haspopup="dialog" aria-expanded={dataMenuOpen}>DATA <span className="data-launch-glyph">↗</span></button>
@@ -1124,6 +1138,22 @@ export default function App() {
 
             <p className="metric-foot">{selected.metrics.model_note}</p>
           </div>}
+
+          {activeTab === 'inspect' && (
+            inspectedCell && terrain ? (
+              <ScientificTerrainInspector
+                terrain={terrain}
+                point={inspectedCell}
+                siteName={selectedMissionSite.region}
+                missionName={selectedMissionSite.mission}
+                maxSlopeDeg={maxSlope}
+                onDismiss={() => setActiveTab('planner')}
+                onClear={() => { setInspectedCell(null); setActiveTab('planner'); }}
+              />
+            ) : (
+              <div className="inspector-empty"><span className="eyebrow">CELL INSPECTION / IDLE</span><strong>No terrain cell selected</strong><p>Click any visible point on the 2D or 3D terrain surface to load its scientific readout.</p></div>
+            )
+          )}
 
           {activeTab === 'science' && (
             <ScientificTargetsPanel
@@ -1207,6 +1237,8 @@ export default function App() {
                     return;
                   }
                   setTerrain(nextTerrain);
+                  setInspectedCell(null);
+                  setActiveTab('planner');
                   setActiveJevDecision(null);
                   setPlan(null);
                   setRoutes([]);
