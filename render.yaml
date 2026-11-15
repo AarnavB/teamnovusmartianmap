@@ -1,3 +1,9 @@
+envVarGroups:
+  - name: marscope-jev-secrets
+    envVars:
+      - key: MARSCOPE_JEV_SERVICE_TOKEN
+        generateValue: true
+
 services:
   - type: web
     name: marswalk-api
@@ -10,5 +16,19 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
-      - key: CORS_ORIGINS
-        sync: false
+      - key: JEV_SERVICE_URL
+        value: https://marscope-jev.onrender.com
+      - fromGroup: marscope-jev-secrets
+
+  - type: web
+    name: marscope-jev
+    runtime: node
+    plan: free
+    rootDir: decision-service
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.15.0
+      - fromGroup: marscope-jev-secrets

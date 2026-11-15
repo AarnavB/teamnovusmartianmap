@@ -11,14 +11,14 @@ from time import perf_counter
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Body
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Body, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from .benchmarks import scalar_baseline, benchmark_label_caps
 from .lpa import LPAStar
 from .models import BenchmarkRequest, ConditionUpdateRequest, PlanRequest, ReplanRequest, SensitivityRequest, WaypointPlanRequest
-from .planner import MissionConstraints, build_route_set, route_metrics
+from .planner import MissionConstraints, MultiObjectiveAStar, build_route_set, route_metrics
 from .registry import get_registry
 from .terrain import Terrain
 from .mission_sites import MISSION_SITES, SUPPORTED_SITE_IDS
@@ -33,6 +33,7 @@ from .domain.pds_labels import inspect_label as inspect_pds_label, save_label as
 from .services.wmts import LAYERS as WMTS_LAYERS, get_capabilities as get_wmts_capabilities, download_tile_cache, inspect_cached_packages
 from .services.official_downloads import download_official_file, DownloadError
 from .services.dem_cache import DemSourceError, DemValidationError, DemCacheError, load_or_fetch_site_terrain, cache_mode
+from .services.jev_client import request_jev_evidence_assessment, request_jev_pathfinding_weights
 
 app = FastAPI(
     title="MARSCOPE API",
@@ -274,6 +275,85 @@ def registry() -> dict[str, Any]:
         },
     }
 
+@app.post("/api/jev/pathfinding-weights")
+async def jev_pathfinding_weights(response: Response, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """Generate request-scoped JEV preferences from the selected site's real layer inventory."""
+    provider = payload.get("provider", "typesafe")
+    api_key = payload.get("apiKey")
+    mission_prompt = payload.get("missionPrompt")
+    site_id = payload.get("site_id", "jezero")
+
+    if provider not in {"typesafe", "opencode"}:
+        raise HTTPException(status_code=422, detail="Select a supported JEV provider.")
+    if not isinstance(api_key, str) or not api_key.strip() or len(api_key) > 1024:
+        raise HTTPException(status_code=422, detail="Enter a provider API key (maximum 1,024 characters).")
+    if not isinstance(mission_prompt, str) or not mission_prompt.strip() or len(mission_prompt) > 600:
+        raise HTTPException(status_code=422, detail="Mission prompt must contain 1–600 characters.")
+    if not isinstance(site_id, str) or site_id not in SUPPORTED_SITE_IDS:
+        raise HTTPException(status_code=422, detail="Select a supported Mars mission site.")
+
+    active_terrain = _terrain_for_site(site_id)
+    available_layers = sorted(active_terrain.available_layers)
+    mission_context: dict[str, str | int | float | bool | None] = {
+        "site_id": site_id,
+        "site_name": active_terrain.site_name,
+        "grid_width": active_terrain.width,
+        "grid_height": active_terrain.height,
+        "cell_size_m": active_terrain.cell_m,
+    }
+
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    result = await request_jev_pathfinding_weights({
+        "provider": provider,
+        "apiKey": api_key,
+        "missionPrompt": mission_prompt,
+        "availableLayers": available_layers,
+        "missionContext": mission_context,
+    })
+    return result
+
+
+@app.post("/api/jev/evidence-assessment")
+async def jev_evidence_assessment(response: Response, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """Assess user-supplied NASA evidence without changing the source record or planner."""
+    provider = payload.get("provider", "typesafe")
+    api_key = payload.get("apiKey")
+    objective = payload.get("objective")
+    hypothesis = payload.get("hypothesis")
+    evidence = payload.get("evidence")
+
+    if provider not in {"typesafe", "opencode"}:
+        raise HTTPException(status_code=422, detail="Select a supported JEV provider.")
+    if not isinstance(api_key, str) or not api_key.strip() or len(api_key) > 1024:
+        raise HTTPException(status_code=422, detail="Enter a provider API key (maximum 1,024 characters).")
+    if not isinstance(objective, str) or not objective.strip() or len(objective) > 500:
+        raise HTTPException(status_code=422, detail="Mission objective must contain 1–500 characters.")
+    if not isinstance(hypothesis, str) or not hypothesis.strip() or len(hypothesis) > 700:
+        raise HTTPException(status_code=422, detail="Hypothesis must contain 1–700 characters.")
+    if not isinstance(evidence, list) or not 1 <= len(evidence) <= 4:
+        raise HTTPException(status_code=422, detail="Provide between 1 and 4 NASA evidence records.")
+    for record in evidence:
+        if not isinstance(record, dict):
+            raise HTTPException(status_code=422, detail="Each NASA evidence record must be an object.")
+        for key in ("id", "title", "summary", "url"):
+            value = record.get(key)
+            if not isinstance(value, str) or not value.strip() or len(value) > 2000:
+                raise HTTPException(status_code=422, detail=f"Evidence records require a valid {key} field.")
+        if not record["url"].lower().startswith(("https://", "http://")):
+            raise HTTPException(status_code=422, detail="Evidence source URL must use HTTP or HTTPS.")
+
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return await request_jev_evidence_assessment({
+        "provider": provider,
+        "apiKey": api_key,
+        "objective": objective,
+        "hypothesis": hypothesis,
+        "evidence": evidence,
+    })
+
+
 @app.post("/api/routes")
 def routes(payload: PlanRequest) -> dict[str, Any]:
     start = (payload.start.x, payload.start.y)
@@ -316,6 +396,7 @@ def routes(payload: PlanRequest) -> dict[str, Any]:
         "start": {"x": start[0], "y": start[1]},
         "goal": {"x": goal[0], "y": goal[1]},
         "constraints": constraints.__dict__,
+        "pathfinding_weight_source": "jev" if constraints.objective_weights else "static_profile",
         "routes": route_set,
         "scientific_note": f"Routes use the imported {active_terrain.site_name} DEM. {active_terrain.warning}",
     }
