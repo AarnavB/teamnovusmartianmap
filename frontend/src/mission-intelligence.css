@@ -169,3 +169,21 @@
 .robustness-controls button{padding:8px 10px;border:1px solid rgba(116,194,177,.36);border-radius:6px;background:rgba(55,116,104,.2);color:#a9decf;font:8px 'DM Mono',monospace;letter-spacing:.04em}
 .robustness-controls button:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:520px){.robustness-controls{align-items:flex-start;flex-direction:column}.robustness-controls button{width:100%}}
+/* Mission intelligence diagnostics and source-aware interaction states */
+.provenance-layer-list{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:8px 0 14px}
+.provenance-layer{min-width:0;padding:9px;border:1px solid rgba(125,158,153,.15);border-radius:8px;background:rgba(15,26,27,.62)}
+.provenance-layer-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.provenance-layer-heading strong{color:#dce7de;font-size:9px}
+.provenance-layer-heading span{font:7px 'DM Mono',monospace;letter-spacing:.06em}
+.provenance-layer-heading .available{color:#84c6ac}.provenance-layer-heading .unavailable{color:#b28c70}
+.provenance-layer>small{display:block;margin-top:5px;color:#86a097;font:7px 'DM Mono',monospace;overflow-wrap:anywhere}
+.provenance-layer p{margin:7px 0 0;color:#a8b7ad;font-size:8px;line-height:1.5;overflow-wrap:anywhere}
+.provenance-layer .provenance-layer-method{color:#7e968d}
+.science-objective-limit{margin:8px 0;color:#9ab7aa;font:8px 'DM Mono',monospace;letter-spacing:.05em}
+.science-form-error{padding:8px;border:1px solid rgba(214,132,102,.35);border-radius:6px;background:rgba(126,56,45,.12);color:#e0a58f;font-size:9px}
+.robustness-data-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin:10px 0}
+.robustness-data-grid>div{display:flex;flex-direction:column;gap:5px;min-width:0;padding:8px;border:1px solid rgba(120,164,154,.16);border-radius:7px;background:rgba(12,24,25,.62)}
+.robustness-data-grid span{color:#819994;font:7px 'DM Mono',monospace;letter-spacing:.04em}
+.robustness-data-grid strong{color:#e0d0aa;font:11px 'DM Mono',monospace;overflow-wrap:anywhere}
+@media(max-width:760px){.provenance-layer-list{grid-template-columns:1fr 1fr}.robustness-data-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.provenance-layer-list{grid-template-columns:1fr}}

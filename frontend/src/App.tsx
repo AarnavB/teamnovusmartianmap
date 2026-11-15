@@ -1058,12 +1058,30 @@ export default function App() {
               start={start}
               onTargetsChange={setCustomScienceTargets}
               onSelectedChange={(ids) => {
-                setSelectedScienceTargetIds(ids);
-                const selectedTargets = scienceTargets.filter((target) => ids.includes(target.id));
-                setWaypoints(selectedTargets.map((target) => ({ x: target.x, y: target.y })));
+                const boundedIds = ids.slice(0, 5);
+                setSelectedScienceTargetIds(boundedIds);
+                const selectedTargets = scienceTargets.filter((target) => boundedIds.includes(target.id));
+                const seen = new Set<string>();
+                const nextWaypoints = selectedTargets
+                  .map((target) => ({ x: Math.round(target.x), y: Math.round(target.y) }))
+                  .filter((point) => {
+                    const key = `${point.x},${point.y}`;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                  })
+                  .slice(0, 5);
+                setWaypoints(nextWaypoints);
+                void runPlan(start, goal, nextWaypoints);
               }}
               onScoresChange={setScienceTargetScores}
-              onSetDestination={(point) => { setGoal(point); setWaypoints([]); setPickMode(null); setActiveTab('planner'); }}
+              onSetDestination={(point) => {
+                setGoal(point);
+                setWaypoints([]);
+                setPickMode(null);
+                setActiveTab('planner');
+                void runPlan(start, point, []);
+              }}
             />
           )}
 
@@ -1136,6 +1154,7 @@ export default function App() {
           progressIndex={evaIndex}
           targets={scienceTargets}
           selectedTargetIds={selectedScienceTargetIds}
+          maxSlope={maxSlope}
           oxygenRemainingL={Math.max(0, oxygenBudget - elapsedOxygenL)}
           energyRemainingWh={Math.max(0, energyBudgetWh - elapsedEnergyWh)}
           evaMinutesRemaining={remainingEVAClockMin}

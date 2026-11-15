@@ -40,6 +40,34 @@ export default function RouteRobustnessPanel({
 
   const currentResult = analyzedFor === analysisKey ? result : null;
 
+  const routeDiagnostics = useMemo(() => {
+    if (!terrain || !selectedRoute) return null;
+    const path = selectedRoute.path;
+    const inBounds = path.filter((point) => point.x >= 0 && point.y >= 0 && point.x < terrain.width && point.y < terrain.height);
+    const maskKnown = Boolean(terrain.valid_mask);
+    const noData = maskKnown ? inBounds.filter((point) => terrain.valid_mask?.[point.y]?.[point.x] === false).length : null;
+    const validMaskCells = maskKnown ? inBounds.filter((point) => terrain.valid_mask?.[point.y]?.[point.x] === true).length : null;
+    const blocked = inBounds.filter((point) => terrain.obstacle?.[point.y]?.[point.x] === true).length;
+    const slopeAvailable = (terrain.available_layers ?? []).includes('slope');
+    const slopes = slopeAvailable ? inBounds.map((point) => terrain.slope_deg?.[point.y]?.[point.x]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value)) : [];
+    const uncertaintyAvailable = (terrain.available_layers ?? []).includes('uncertainty') && Boolean(terrain.uncertainty);
+    const uncertainty = uncertaintyAvailable ? inBounds.map((point) => terrain.uncertainty?.[point.y]?.[point.x]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value)) : [];
+    return {
+      total: path.length,
+      inBounds: inBounds.length,
+      outOfBounds: path.length - inBounds.length,
+      maskKnown,
+      noData,
+      validMaskCells,
+      blocked,
+      maxSlope: slopes.length ? Math.max(...slopes) : null,
+      aboveLimit: slopes.length ? slopes.filter((value) => value > maxSlope).length : null,
+      uncertaintyAvailable,
+      meanUncertainty: uncertainty.length ? uncertainty.reduce((sum, value) => sum + value, 0) / uncertainty.length : null,
+      maxUncertainty: uncertainty.length ? Math.max(...uncertainty) : null,
+    };
+  }, [terrain, selectedRoute, maxSlope]);
+
   const summary = useMemo(() => {
     if (!currentResult || !selectedRoute) return null;
     const valid = currentResult.sweep.filter((item) => item.feasible && item.path.length > 0);
@@ -83,7 +111,17 @@ export default function RouteRobustnessPanel({
   };
 
   return <section className="robustness-panel">
-    <div className="robustness-head"><div><span className="eyebrow">ROUTE VALIDATION</span><h3>Robustness & sensitivity</h3><p>Re-runs the balanced planner under three nearby maximum-slope constraints on the active DEM.</p></div><span className="robustness-tag">SCENARIO SWEEP</span></div>
+    <div className="robustness-head"><div><span className="eyebrow">ROUTE VALIDATION</span><h3>Robustness & sensitivity</h3><p>Inspect the selected path against the active DEM mask and rerun the planner under nearby maximum-slope constraints.</p></div><span className="robustness-tag">SCENARIO SWEEP</span></div>
+    {routeDiagnostics && <div className="robustness-data-grid">
+      <div><span>PATH CELLS IN GRID</span><strong>{routeDiagnostics.inBounds}/{routeDiagnostics.total}</strong></div>
+      <div><span>NODATA ON PATH</span><strong>{routeDiagnostics.maskKnown ? routeDiagnostics.noData : 'N/A'}</strong></div>
+      <div><span>PLANNER-BLOCKED CELLS</span><strong>{routeDiagnostics.blocked}</strong></div>
+      <div><span>MAX PATH SLOPE</span><strong>{routeDiagnostics.maxSlope === null ? 'N/A' : `${routeDiagnostics.maxSlope.toFixed(1)}°`}</strong></div>
+      <div><span>CELLS ABOVE LIMIT</span><strong>{routeDiagnostics.aboveLimit === null ? 'N/A' : routeDiagnostics.aboveLimit}</strong></div>
+      <div><span>VALID MASK CELLS</span><strong>{routeDiagnostics.maskKnown ? routeDiagnostics.validMaskCells : 'Not supplied'}</strong></div>
+      <div><span>MEAN UNCERTAINTY</span><strong>{routeDiagnostics.uncertaintyAvailable ? (routeDiagnostics.meanUncertainty === null ? 'N/A' : routeDiagnostics.meanUncertainty.toFixed(3)) : 'Not mapped'}</strong></div>
+      <div><span>MAX UNCERTAINTY</span><strong>{routeDiagnostics.uncertaintyAvailable ? (routeDiagnostics.maxUncertainty === null ? 'N/A' : routeDiagnostics.maxUncertainty.toFixed(3)) : 'Not mapped'}</strong></div>
+    </div>}
     <div className="robustness-controls"><span>Baseline maximum slope: <b>{maxSlope.toFixed(0)}°</b></span><button onClick={() => void runAnalysis()} disabled={!terrain || !selectedRoute || loading}>{loading ? 'EVALUATING SCENARIOS…' : currentResult ? 'RERUN ANALYSIS' : 'RUN ROBUSTNESS ANALYSIS'}</button></div>
     {loading && <div className="robustness-state">Evaluating the requested terrain-constraint scenarios. This may take longer on the hosted research API.</div>}
     {error && <div className="robustness-error">Sensitivity analysis unavailable: {error}</div>}
@@ -103,9 +141,8 @@ export default function RouteRobustnessPanel({
           <small>{item.feasible ? `${item.distance_m?.toFixed(0) ?? '—'} m · ${overlap ?? '—'}% path overlap` : item.error ?? 'Infeasible'}</small>
         </div>;
       })}</div>
-      <p className="robustness-footnote">{currentResult?.notice} Path overlap compares the selected route with the balanced-profile route produced by each backend slope scenario. This is a deterministic sensitivity sweep, not a probability of safety or a guarantee under unmodelled terrain conditions.</p>
+      <p className="robustness-footnote">{currentResult?.notice} Path overlap compares the selected route with the balanced-profile route produced by each backend slope scenario. This is a deterministic constraint sensitivity sweep, not a probability of safety or a guarantee under unmodelled terrain conditions.</p>
     </>}
     {!loading && !currentResult && !error && <div className="robustness-state">{!terrain ? 'Load a verified DEM first.' : !selectedRoute ? 'Generate a route first.' : 'Run the scenario sweep when you want to evaluate this route. Results are tied to the current route and constraints.'}</div>}
   </section>;
 }
-
