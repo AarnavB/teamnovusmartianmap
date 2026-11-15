@@ -119,7 +119,9 @@ async function evaluateWithOpenCode(
 
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(`OpenCode Jev returned HTTP ${response.status}. Check the OpenCode key, model access, and temporary free-model availability.`);
+    const error = new Error("OpenCode Jev provider request failed.");
+    Object.assign(error, { statusCode: response.status });
+    throw error;
   }
   if (!payload || typeof payload !== "object" || !("answers" in payload)) {
     throw new Error("OpenCode Jev returned an unexpected response. No decision was created.");
