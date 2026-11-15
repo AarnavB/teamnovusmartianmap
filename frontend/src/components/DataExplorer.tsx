@@ -28,7 +28,7 @@ function siteBounds(site: MissionSite): string {
   ].map((value) => value.toFixed(4)).join(',');
 }
 
-export default function DataExplorer({ sources, planId, onTerrainImported, missionSite }: { sources: OfficialSource[]; planId?: string; onTerrainImported: (terrain: TerrainData) => void; missionSite: MissionSite }) {
+export default function DataExplorer({ sources, planId, onTerrainImported, missionSite, terrainLoaded }: { sources: OfficialSource[]; planId?: string; onTerrainImported: (terrain: TerrainData) => void; missionSite: MissionSite; terrainLoaded: boolean }) {
   const [keywords, setKeywords] = useState(() => `${missionSite.mission} ${missionSite.region} Mars`);
   const [instrument, setInstrument] = useState('HiRISE');
   const [pdsResult, setPdsResult] = useState<ArchiveResult | null>(null);
@@ -189,7 +189,7 @@ export default function DataExplorer({ sources, planId, onTerrainImported, missi
 
   return <div className="data-content archive-explorer">
     <section className="archive-search-card mission-dem-card">
-      <div className="archive-section-head"><b>ACTIVE SITE · REAL TERRAIN SOURCE</b><span className="manual-tag">IMPORT REQUIRED</span></div>
+      <div className="archive-section-head"><b>ACTIVE SITE · REAL TERRAIN SOURCE</b><span className={terrainLoaded ? "connected-tag" : "manual-tag"}>{terrainLoaded ? "REAL DEM LOADED" : "IMPORT REQUIRED"}</span></div>
       <h3>{missionSite.region}</h3>
       <p><b>{missionSite.dem.product}</b></p>
       <p>{missionSite.dem.source} · {missionSite.dem.resolutionM.toFixed(missionSite.dem.resolutionM < 2 ? 2 : 1)} m/post · {missionSite.dem.format}</p>
