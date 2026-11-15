@@ -8,7 +8,7 @@ def test_fixture_is_repeatable_and_explicitly_synthetic():
     assert len(a.elevation_m) == 64
     payload = a.to_dict()
     assert payload["status"] == "SIMULATED_NOT_GEOREFERENCED"
-    assert payload["id"] == "mars-demo-synthetic-01"
+    assert payload["id"] == "mars-demo-demo-77"
     assert payload["name"] == "Synthetic Martian teaching tile"
-    assert "any selected Mars mission site" in payload["warning"]
+    assert "not a geographic crop or measured elevation/hazard dataset" in payload["warning"]
     assert len(a.targets) == 3

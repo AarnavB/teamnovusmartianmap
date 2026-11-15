@@ -333,7 +333,7 @@ class MultiObjectiveAStar:
         if goal_label is None:
             if self._hard_constraint_path_exists(start, goal):
                 raise ValueError(
-                    "A terrain-valid path exists, but the EVA time, energy, or oxygen budget is too small "
+                    "A terrain-valid path exists, but at least one EVA time budget, energy budget, or oxygen budget is too small "
                     "after preserving the configured return reserve. Increase the corresponding resource "
                     "budget or choose a closer destination. Changing objective-weight preferences does not "
                     "override hard resource limits."

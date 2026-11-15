@@ -69,19 +69,37 @@ def validate_site_coverage(path: Path, *, latitude: float, longitude_east: float
             raise ValueError("The DEM must contain a projected planetary CRS. A filename or browse image is not georeferencing.")
         if str(src.crs.linear_units).lower() not in {"metre", "meter", "meters", "metres"}:
             raise ValueError("The DEM's projected CRS must use metres.")
-        geographic = src.crs.geodetic_crs
+        from pyproj import CRS as PyprojCRS
+        projected_crs = PyprojCRS.from_wkt(src.crs.to_wkt())
+        geographic = projected_crs.geodetic_crs
         if geographic is None:
             raise ValueError("The raster CRS does not expose a geographic base CRS, so its footprint cannot be verified against the mission-site coordinate.")
-        transformer = Transformer.from_crs(geographic, src.crs, always_xy=True)
+
+        ellipsoid = geographic.ellipsoid
+        semi_major = float(ellipsoid.semi_major_metre)
+        semi_minor = float(ellipsoid.semi_minor_metre)
+        if not _is_mars_ellipsoid(semi_major, semi_minor):
+            raise ValueError("The raster CRS ellipsoid does not match the Mars reference ellipsoid; site coverage cannot be verified.")
+
+        # Mission-site catalog coordinates are planetocentric. The geographic
+        # base CRS used by PROJ expects planetographic (geodetic) latitude.
+        # Convert explicitly rather than silently treating the two as equal.
+        latitude_rad = math.radians(float(latitude))
+        latitude_planetographic = math.degrees(math.atan2(
+            semi_major * semi_major * math.sin(latitude_rad),
+            semi_minor * semi_minor * math.cos(latitude_rad),
+        ))
+        transformer = Transformer.from_crs(geographic, projected_crs, always_xy=True)
         candidates = [longitude_east]
         # Planetary products use both 0–360 east-positive and -180–180
         # longitude domains. Test the equivalent coordinate in both domains.
         candidates.append(longitude_east - 360.0 if longitude_east > 180.0 else longitude_east + 360.0)
         for longitude in candidates:
-            x, y = transformer.transform(longitude, latitude)
+            x, y = transformer.transform(longitude, latitude_planetographic)
             if src.bounds.left <= x <= src.bounds.right and src.bounds.bottom <= y <= src.bounds.top:
                 return {
                     "reference_latitude_planetocentric": latitude,
+                    "reference_latitude_planetographic_for_transform": latitude_planetographic,
                     "reference_longitude_east": longitude_east,
                     "reference_longitude_transformed": longitude,
                     "projected_reference_xy_m": [float(x), float(y)],
@@ -264,6 +282,10 @@ def dem_to_terrain(
             "route_grid": [width, height],
             "route_grid_bounds_m": list(route_bounds),
             "route_grid_cell_size_m": cell_m,
+            "route_grid_window_size_m": [
+                route_bounds[2] - route_bounds[0],
+                route_bounds[3] - route_bounds[1],
+            ],
             "declared_vertical_units": vertical_units,
             "source_band_unit": info.get("units", [None])[0],
             "slope": "atan(sqrt(dz/dx^2 + dz/dy^2)) on valid raster data",

@@ -181,11 +181,14 @@ def registry() -> dict[str, Any]:
 
 @app.post("/api/routes")
 def routes(payload: PlanRequest) -> dict[str, Any]:
-    active_terrain = _terrain_for_site(payload.site_id)
     start = (payload.start.x, payload.start.y)
     goal = (payload.goal.x, payload.goal.y)
     try:
         constraints = MissionConstraints.from_dict(payload.constraints)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    active_terrain = _terrain_for_site(payload.site_id)
+    try:
         planner_started = perf_counter()
         route_set = build_route_set(active_terrain, start, goal, constraints)
         planning_runtime_ms = round((perf_counter() - planner_started) * 1000.0, 2)
@@ -272,11 +275,14 @@ def replan(payload: ReplanRequest) -> dict[str, Any]:
 
 @app.post("/api/benchmark")
 def benchmark(payload: BenchmarkRequest) -> dict[str, Any]:
-    active_terrain = _terrain_for_site(payload.site_id)
     start = (payload.start.x, payload.start.y)
     goal = (payload.goal.x, payload.goal.y)
     try:
         constraints = MissionConstraints.from_dict(payload.constraints)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    active_terrain = _terrain_for_site(payload.site_id)
+    try:
         results = [
             scalar_baseline(active_terrain, start, goal, constraints, "standard_astar"),
             scalar_baseline(active_terrain, start, goal, constraints, "dijkstra"),
