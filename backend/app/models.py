@@ -48,3 +48,10 @@ class WaypointPlanRequest(BaseModel):
     waypoints: list[Point] = Field(default_factory=list)
     goal: Point
     constraints: dict = Field(default_factory=dict)
+
+
+class MissionEventRequest(BaseModel):
+    event_type: str = Field(min_length=1, max_length=40)
+    title: str = Field(min_length=1, max_length=120)
+    summary: str = Field(default="", max_length=500)
+    data: dict = Field(default_factory=dict)

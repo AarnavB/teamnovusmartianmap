@@ -1,6 +1,48 @@
 export type Point = { x: number; y: number };
 
 export type PlannerObjective = 'distance' | 'time' | 'energy' | 'terrain_risk' | 'environment_risk' | 'radiation' | 'uncertainty' | 'science_opportunity_cost' | 'oxygen';
+
+export type JevProvider = 'typesafe' | 'opencode';
+export type JevWeightJudgement = {
+  objective: PlannerObjective;
+  label: string;
+  score: number;
+  relevance: number;
+  confidence: number;
+  normalizedPriority: number;
+  weight: number;
+};
+export type JevEvidenceAssessmentResponse = {
+  model: string;
+  evaluatedAt: string;
+  results: Array<{
+    evidenceId: string;
+    title: string;
+    stance: 'supports' | 'contradicts' | 'contextual' | 'insufficient';
+    stanceConfidence: number;
+    relevanceScore: number;
+    relevanceConfidence: number;
+    directSupportProbability: number;
+    noveltyScore: number;
+    noveltyConfidence: number;
+    source: { url: string; mission?: string; instrument?: string; observationDate?: string; sol?: number | null; credit?: string };
+  }>;
+  notice: string;
+};
+export type JevPathfindingWeights = {
+  provider: JevProvider;
+  model: string;
+  evaluatedAt: string;
+  missionPrompt: string;
+  strategy: 'balanced' | 'risk_first' | 'efficiency_first' | 'science_first' | 'uncertainty_first';
+  weights: Record<PlannerObjective, number>;
+  judgements: JevWeightJudgement[];
+  jevInfluenceShare: number;
+  strategyPriorShare: number;
+  usage: { input_tokens: number | null; output_tokens: number | null };
+  policyVersion: string;
+  notice: string;
+};
 export type MissionConstraintsPayload = {
   max_slope_deg?: number;
   max_temperature_c?: number;
@@ -15,6 +57,7 @@ export type MissionConstraintsPayload = {
   rest_interval_min?: number;
   rest_duration_min?: number;
   objective_weight_multipliers?: Partial<Record<PlannerObjective, number>>;
+  objective_weights?: Partial<Record<PlannerObjective, number>>;
 };
 
 export type Target = {
@@ -78,6 +121,8 @@ export type RouteMetrics = {
 };
 
 export type Route = {
+  weight_source?: 'jev' | 'static_profile';
+  weight_policy_version?: string | null;
   id: string;
   profile: 'conservative' | 'balanced' | 'science_first';
   name: string;
@@ -97,6 +142,13 @@ export type Route = {
   };
   weights: Record<string, number>;
   is_pareto: boolean;
+  tradeoff_summary?: string;
+  diversity?: {
+    max_corridor_overlap_pct: number;
+    unique_corridor_pct: number;
+    label: string;
+    interpretation: string;
+  };
 };
 
 export type PlanResponse = {
@@ -107,6 +159,7 @@ export type PlanResponse = {
   start: Point;
   goal: Point;
   constraints: MissionConstraintsPayload;
+  pathfinding_weight_source?: 'jev' | 'static_profile';
   routes: Route[];
   scientific_note: string;
 };
@@ -121,6 +174,16 @@ export type ReplanResponse = {
   total_expanded_lifetime: number;
   obstacles_added: Point[];
   notice: string;
+};
+
+export type MissionEvent = {
+  id: string;
+  sequence: number;
+  timestamp_utc: string;
+  type: string;
+  title: string;
+  summary: string;
+  data: Record<string, unknown>;
 };
 
 export type DatasetRecord = {
