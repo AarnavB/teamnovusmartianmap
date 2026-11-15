@@ -5,10 +5,11 @@ import DecisionCenter from './components/DecisionCenter';
 import RouteProfileChart from './components/RouteProfileChart';
 import RouteExplainability from './components/RouteExplainability';
 import RouteComparisonTable from './components/RouteComparisonTable';
+import MissionReplay from './components/MissionReplay';
 import SensitivityAnalysis from './components/SensitivityAnalysis';
 import { api } from './api';
 import { DEFAULT_MISSION_SITE_ID, MISSION_SITES } from './missionSites';
-import type { BenchmarkResult, JevPathfindingWeights, JevProvider, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, Route, TerrainData } from './types';
+import type { BenchmarkResult, JevPathfindingWeights, JevProvider, MissionEvent, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, Route, TerrainData } from './types';
 
 type ActiveJevDecision = { siteId: string; result: JevPathfindingWeights };
 type Layer = 'elevation' | 'slope' | 'roughness' | 'regolith' | 'temperature' | 'environment' | 'radiation' | 'uncertainty' | 'science';
@@ -62,6 +63,7 @@ export default function App() {
   const [datasets, setDatasets] = useState<OfficialSource[]>([]);
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [routes, setRoutes] = useState<Route[]>([]);
+  const [missionEvents, setMissionEvents] = useState<MissionEvent[]>([]);
   const [selectedRoute, setSelectedRoute] = useState('B');
   const [start, setStart] = useState<Point>(INITIAL_START);
   const [goal, setGoal] = useState<Point>(INITIAL_GOAL);
@@ -146,6 +148,7 @@ export default function App() {
     setBenchmarkResults([]);
     setAddedObstacles([]);
     setReplanResult(null);
+    setMissionEvents([]);
     setConditionNotice('');
     setEvaProgressIndex(0);
     setStart(INITIAL_START);
@@ -228,6 +231,32 @@ export default function App() {
       setRoutes(result.routes);
       setSelectedRoute(validJevDecision ? 'B' : result.routes[0]?.id ?? 'B');
       setEvaProgressIndex(0);
+      try {
+        if (validJevDecision) {
+          await api.recordMissionEvent(result.plan_id, {
+            event_type: 'JEV_DECISION',
+            title: 'JEV pathfinding decision recorded',
+            summary: `JEV selected the ${validJevDecision.result.strategy} strategy for Route B.`,
+            data: {
+              provider: validJevDecision.result.provider,
+              model: validJevDecision.result.model,
+              strategy: validJevDecision.result.strategy,
+              evaluatedAt: validJevDecision.result.evaluatedAt,
+              missionPrompt: validJevDecision.result.missionPrompt,
+              weights: validJevDecision.result.weights,
+              judgements: validJevDecision.result.judgements,
+              jevInfluenceShare: validJevDecision.result.jevInfluenceShare,
+              strategyPriorShare: validJevDecision.result.strategyPriorShare,
+              policyVersion: validJevDecision.result.policyVersion,
+              notice: validJevDecision.result.notice,
+            },
+          });
+        }
+        const eventSnapshot = await api.missionEvents(result.plan_id);
+        if (activeMissionSiteIdRef.current === siteId) setMissionEvents(eventSnapshot.events);
+      } catch {
+        setMissionEvents([]);
+      }
     } catch (err) {
       if (activeMissionSiteIdRef.current === siteId) {
         setError(err instanceof Error ? err.message : 'Route planning failed');
@@ -281,6 +310,7 @@ export default function App() {
     activeMissionSiteIdRef.current = siteId;
     setActiveJevDecision(null);
     setJevNotice('Site changed. The previous site-specific JEV vector was cleared.');
+    setMissionEvents([]);
     setSelectedMissionSiteId(siteId);
   };
 
@@ -381,6 +411,8 @@ export default function App() {
       setRoutes((previous) => previous.map((route) => route.profile === 'balanced' ? { ...route, path: result.path, metrics: result.metrics } : route));
       setEvaProgressIndex(0);
       setConditionNotice(`${result.notice} Repaired ${result.expanded_during_repair} search nodes.`);
+      const eventSnapshot = await api.missionEvents(plan.plan_id);
+      setMissionEvents(eventSnapshot.events);
     } catch (err) { setError(err instanceof Error ? err.message : 'Condition update failed'); }
     finally { setReplanning(false); }
   };
@@ -412,11 +444,25 @@ export default function App() {
         : route));
       setSelectedRoute('B');
       setEvaProgressIndex(0);
+      const eventSnapshot = await api.missionEvents(plan.plan_id);
+      setMissionEvents(eventSnapshot.events);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Adaptive replanning failed');
     } finally {
       setReplanning(false);
     }
+  };
+
+  const handleRouteSelect = (routeId: string) => {
+    if (routeId === selectedRoute) return;
+    setSelectedRoute(routeId);
+    if (!plan) return;
+    void api.recordMissionEvent(plan.plan_id, {
+      event_type: 'ROUTE_SELECTED',
+      title: `Route ${routeId} selected`,
+      summary: 'The operator changed the route used for review and mission replay.',
+      data: { route_id: routeId },
+    }).then((snapshot) => setMissionEvents(snapshot.events)).catch(() => undefined);
   };
 
   const downloadReport = async (format: 'markdown' | 'json') => {
@@ -840,14 +886,16 @@ export default function App() {
                 <RouteComparisonTable
                   routes={routes}
                   selectedRouteId={selectedRoute}
-                  onSelectRoute={setSelectedRoute}
+                  onSelectRoute={handleRouteSelect}
                 />
               )}
 
               <div className="route-cards">
-                {routes.map((route) => <button key={route.id} className={`route-card ${selectedRoute === route.id ? 'selected' : ''}`} onClick={() => setSelectedRoute(route.id)}>
+                {routes.map((route) => <button key={route.id} className={`route-card ${selectedRoute === route.id ? 'selected' : ''}`} onClick={() => handleRouteSelect(route.id)}>
                   <div className="route-card-top"><span className={`route-letter route-${route.id}`}>{route.id}</span><span className="route-status">{route.is_pareto ? 'PARETO' : 'ALTERNATIVE'}</span></div>
                   <strong>{route.name}</strong><p>{route.summary}</p>
+                  {route.tradeoff_summary && <small className="route-tradeoff">{route.tradeoff_summary}</small>}
+                  {route.diversity && <small className="route-diversity">{route.diversity.label} · {route.diversity.unique_corridor_pct.toFixed(0)}% unique corridor</small>}
                   <div className="route-metrics-mini"><span><b>{route.metrics.distance_m.toFixed(0)}</b> m</span><span><b>{route.metrics.duration_min.toFixed(1)}</b> min</span><span><b>{route.metrics.terrain_risk_pct?.toFixed(0) ?? 'N/A'}</b> risk</span></div>
                 </button>)}
               </div>
@@ -870,6 +918,19 @@ export default function App() {
                   goal={goal}
                   maxSlopeDeg={maxSlope}
                   onSelectDeviation={setDeviationPoint}
+                />
+              )}
+
+              {plan && (
+                <MissionReplay
+                  events={missionEvents}
+                  terrainWidth={terrain?.width ?? 64}
+                  terrainHeight={terrain?.height ?? 64}
+                  siteName={selectedMissionSite.region}
+                  selectedRouteId={selectedRoute}
+                  selectedRoute={selected ?? null}
+                  onExportReplay={() => void downloadReport('json')}
+                  exporting={reportLoading}
                 />
               )}
 

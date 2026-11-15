@@ -45,6 +45,8 @@ export default function RouteComparisonTable({ routes, selectedRouteId, onSelect
                     <div>
                       <strong>{r.name}</strong>
                       <span className="th-sub">{r.profile}</span>
+                      {r.tradeoff_summary && <small className="th-tradeoff">{r.tradeoff_summary}</small>}
+                      {r.diversity && <small className="th-tradeoff">{r.diversity.label} · {r.diversity.unique_corridor_pct.toFixed(0)}% unique</small>}
                     </div>
                   </div>
                   {r.id === selectedRouteId && <span className="active-pill">SELECTED</span>}
