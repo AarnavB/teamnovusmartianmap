@@ -351,7 +351,7 @@ def route_metrics(terrain: Terrain, path: list[tuple[int, int]], constraints: Mi
     science_vals: list[float] = []
     for (x0, y0), (x1, y1) in zip(path[:-1], path[1:]):
         d = math.hypot(x1 - x0, y1 - y0) * terrain.cell_m
-        avg_slope = (terrain.slope_deg[y0][x0] + terrain.slope_deg[y1][y1]) / 2.0
+        avg_slope = (terrain.slope_deg[y0][x0] + terrain.slope_deg[y1][x1]) / 2.0
         avg_rough = (terrain.roughness[y0][x0] + terrain.roughness[y1][x1]) / 2.0 if "roughness" in terrain.available_layers else 0.0
         avg_reg = (terrain.regolith[y0][x0] + terrain.regolith[y1][x1]) / 2.0 if "regolith" in terrain.available_layers and terrain.regolith is not None else 0.0
         slope_factor = 1.0 + (avg_slope / max(constraints.max_slope_deg, 1.0)) * 1.8
