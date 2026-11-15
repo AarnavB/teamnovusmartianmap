@@ -6,6 +6,7 @@ import {
   type JevProvider,
   type NasaEvidenceInput,
 } from "./jevDecision.js";
+import { classifyProviderError } from "./providerErrors.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? process.env.MARSCOPE_JEV_PORT ?? 8100);
@@ -148,9 +149,9 @@ app.post("/v1/pathfinding-weights", limitRequests, async (req: Request, res: Res
     );
     res.status(200).json(result);
   } catch (error) {
-    const timedOut = error instanceof Error && error.message === "JEV request timed out.";
-    // Provider errors and request bodies are intentionally not logged: either may contain credentials.
-    sendJevError(req, res, timedOut ? 504 : 502, timedOut ? "JEV timed out. Use the static balanced route or retry." : "JEV could not produce a valid weight vector. No adaptive weights were applied.");
+    // Return a safe status-specific message; never expose raw SDK/provider errors.
+    const failure = classifyProviderError(error);
+    sendJevError(req, res, failure.statusCode, failure.detail);
   }
 });
 
@@ -200,9 +201,9 @@ app.post("/v1/evidence-assessment", limitRequests, async (req: Request, res: Res
     );
     res.status(200).json(result);
   } catch (error) {
-    const timedOut = error instanceof Error && error.message === "JEV request timed out.";
-    // Never log provider error text or evidence payloads; they can contain credentials or user text.
-    sendJevError(req, res, timedOut ? 504 : 502, timedOut ? "JEV evidence review timed out. Retry or continue without AI assessment." : "JEV could not assess the supplied evidence. The original NASA record remains unchanged.");
+    // Evidence review uses the same safe provider error mapping as pathfinding.
+    const failure = classifyProviderError(error);
+    sendJevError(req, res, failure.statusCode, failure.detail);
   }
 });
 
