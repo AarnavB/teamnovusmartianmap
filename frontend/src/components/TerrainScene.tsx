@@ -126,7 +126,13 @@ export default function TerrainScene(props: Props) {
         const b = a + 1;
         const c = a + width;
         const d = c + 1;
-        indices.push(a, c, b, b, c, d);
+        const valid = (index: number) => {
+          const cellY = Math.floor(index / width);
+          const cellX = index % width;
+          return props.terrain.valid_mask?.[cellY]?.[cellX] !== false;
+        };
+        if (valid(a) && valid(c) && valid(b)) indices.push(a, c, b);
+        if (valid(b) && valid(c) && valid(d)) indices.push(b, c, d);
       }
     }
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
