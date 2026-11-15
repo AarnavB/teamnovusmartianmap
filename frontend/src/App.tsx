@@ -7,9 +7,13 @@ import RouteExplainability from './components/RouteExplainability';
 import RouteComparisonTable from './components/RouteComparisonTable';
 import MissionReplay from './components/MissionReplay';
 import SensitivityAnalysis from './components/SensitivityAnalysis';
+import DataProvenancePanel from './components/DataProvenancePanel';
+import ScientificTargetsPanel from './components/ScientificTargetsPanel';
+import RouteRobustnessPanel from './components/RouteRobustnessPanel';
+import AstronautHud from './components/AstronautHud';
 import { api } from './api';
 import { DEFAULT_MISSION_SITE_ID, MISSION_SITES } from './missionSites';
-import type { BenchmarkResult, JevPathfindingWeights, JevProvider, MissionEvent, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, Route, TerrainData } from './types';
+import type { BenchmarkResult, JevPathfindingWeights, JevProvider, MissionEvent, MissionConstraintsPayload, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, Route, Target, TerrainData } from './types';
 
 type ActiveJevDecision = { siteId: string; result: JevPathfindingWeights };
 type Layer = 'elevation' | 'slope' | 'roughness' | 'regolith' | 'temperature' | 'environment' | 'radiation' | 'uncertainty' | 'science';
@@ -64,6 +68,11 @@ export default function App() {
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [missionEvents, setMissionEvents] = useState<MissionEvent[]>([]);
+  const [customScienceTargets, setCustomScienceTargets] = useState<Target[]>([]);
+  const [selectedScienceTargetIds, setSelectedScienceTargetIds] = useState<string[]>([]);
+  const [scienceTargetScores, setScienceTargetScores] = useState<Record<string, number>>({});
+  const [hudOpen, setHudOpen] = useState(false);
+  const [hudMode, setHudMode] = useState<'desktop' | 'helmet' | 'minimal'>('helmet');
   const [selectedRoute, setSelectedRoute] = useState('B');
   const [start, setStart] = useState<Point>(INITIAL_START);
   const [goal, setGoal] = useState<Point>(INITIAL_GOAL);
@@ -72,7 +81,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState<'3D' | '2D'>('3D');
   const [pickMode, setPickMode] = useState<'start' | 'goal' | 'waypoint' | null>(null);
   const [evaMode, setEvaMode] = useState(false);
-  const [activeTab, setActiveTab] = useState<'planner' | 'jev' | 'data'>('planner');
+  const [activeTab, setActiveTab] = useState<'planner' | 'jev' | 'data' | 'science'>('planner');
   const [maxSlope, setMaxSlope] = useState(22);
   const [evaMinutes, setEvaMinutes] = useState(180);
   const [energyBudgetWh, setEnergyBudgetWh] = useState(180);
@@ -115,6 +124,24 @@ export default function App() {
 
   const selectedMissionSite = MISSION_SITES.find((site) => site.id === selectedMissionSiteId) ?? MISSION_SITES[0];
   const hasAtmosphere = (terrain?.available_layers ?? []).includes('atmosphere');
+  const scienceTargets = useMemo(() => {
+    const unique = new Map<string, Target>();
+    [...(terrain?.targets ?? []), ...customScienceTargets].forEach((target) => unique.set(target.id, target));
+    return [...unique.values()];
+  }, [terrain?.targets, customScienceTargets]);
+  const selectedScienceTargets = useMemo(
+    () => scienceTargets.filter((target) => selectedScienceTargetIds.includes(target.id)),
+    [scienceTargets, selectedScienceTargetIds],
+  );
+  const robustnessConstraints = useMemo<MissionConstraintsPayload>(() => ({
+    max_slope_deg: maxSlope,
+    eva_limit_minutes: evaMinutes,
+    energy_budget_wh: energyBudgetWh,
+    oxygen_budget_l: oxygenBudget,
+    oxygen_consumption_lpm: oxygenRate,
+    carried_equipment_mass_kg: equipmentMass,
+    rest_interval_min: restInterval,
+  }), [maxSlope, evaMinutes, energyBudgetWh, oxygenBudget, oxygenRate, equipmentMass, restInterval]);
 
   useEffect(() => {
     let alive = true;
@@ -149,6 +176,10 @@ export default function App() {
     setAddedObstacles([]);
     setReplanResult(null);
     setMissionEvents([]);
+    setCustomScienceTargets([]);
+    setSelectedScienceTargetIds([]);
+    setScienceTargetScores({});
+    setHudOpen(false);
     setConditionNotice('');
     setEvaProgressIndex(0);
     setStart(INITIAL_START);
@@ -679,6 +710,9 @@ export default function App() {
               <button className={`eva-toggle ${evaMode ? 'on' : ''}`} onClick={() => setEvaMode(!evaMode)}>
                 <span className="eva-dot" /> EVA MODE
               </button>
+              <button className="hud-launch-button" onClick={() => setHudOpen(true)} disabled={!terrain}>
+                ⌖ OPEN ASTRONAUT HUD
+              </button>
             </div>
           </div>
 
@@ -703,6 +737,8 @@ export default function App() {
                 waypoints={waypoints}
                 previewRoute={previewRoute}
                 deviationPoint={deviationPoint}
+                scientificTargets={scienceTargets}
+                selectedScientificTargetIds={selectedScienceTargetIds}
               />
             )}
             {terrainLoading && <div className="terrain-loading-state"><span className="spinner" /> LOADING {selectedMissionSite.region.toUpperCase()} TERRAIN</div>}
@@ -921,6 +957,18 @@ export default function App() {
                 />
               )}
 
+              {terrain && selected && (
+                <RouteRobustnessPanel
+                  siteId={selectedMissionSiteId}
+                  terrain={terrain}
+                  start={start}
+                  goal={goal}
+                  maxSlope={maxSlope}
+                  constraints={robustnessConstraints}
+                  selectedRoute={selected}
+                />
+              )}
+
               {plan && (
                 <MissionReplay
                   events={missionEvents}
@@ -931,6 +979,7 @@ export default function App() {
                   selectedRoute={selected ?? null}
                   onExportReplay={() => void downloadReport('json')}
                   exporting={reportLoading}
+                  scienceTargets={selectedScienceTargets}
                 />
               )}
 
@@ -945,7 +994,12 @@ export default function App() {
         </section>
 
         <aside className="right-rail min-w-0">
-          <div className="right-tabs"><button className={activeTab === 'planner' ? 'active' : ''} onClick={() => setActiveTab('planner')}>ANALYTICS</button><button className={activeTab === 'jev' ? 'active' : ''} onClick={() => setActiveTab('jev')}>JEV INTEL</button><button className={activeTab === 'data' ? 'active' : ''} onClick={() => setActiveTab('data')}>DATA</button></div>
+          <div className="right-tabs">
+            <button className={activeTab === 'planner' ? 'active' : ''} onClick={() => setActiveTab('planner')}>ANALYTICS</button>
+            <button className={activeTab === 'science' ? 'active' : ''} onClick={() => setActiveTab('science')}>SCIENCE</button>
+            <button className={activeTab === 'jev' ? 'active' : ''} onClick={() => setActiveTab('jev')}>JEV INTEL</button>
+            <button className={activeTab === 'data' ? 'active' : ''} onClick={() => setActiveTab('data')}>DATA</button>
+          </div>
           {activeTab === 'planner' && selected && <div className="analytics-content">
             <div className="analytics-head"><span className="eyebrow">SELECTED PROFILE</span><div className="selected-title"><span className={`route-letter route-${selected.id}`}>{selected.id}</span><h3>{selected.name}</h3></div></div>
             <div className="metric-hero"><div><span>TOTAL DISTANCE</span><strong>{selected.metrics.distance_m.toFixed(0)}<small>m</small></strong></div><div><span>TRAVEL TIME</span><strong>{selected.metrics.duration_min.toFixed(1)}<small>min</small></strong></div></div>
@@ -995,6 +1049,24 @@ export default function App() {
             <p className="metric-foot">{selected.metrics.model_note}</p>
           </div>}
 
+          {activeTab === 'science' && (
+            <ScientificTargetsPanel
+              terrain={terrain}
+              customTargets={customScienceTargets}
+              selectedIds={selectedScienceTargetIds}
+              scores={scienceTargetScores}
+              start={start}
+              onTargetsChange={setCustomScienceTargets}
+              onSelectedChange={(ids) => {
+                setSelectedScienceTargetIds(ids);
+                const selectedTargets = scienceTargets.filter((target) => ids.includes(target.id));
+                setWaypoints(selectedTargets.map((target) => ({ x: target.x, y: target.y })));
+              }}
+              onScoresChange={setScienceTargetScores}
+              onSetDestination={(point) => { setGoal(point); setWaypoints([]); setPickMode(null); setActiveTab('planner'); }}
+            />
+          )}
+
           {activeTab === 'jev' && (
             <DecisionCenter
               siteName={`${selectedMissionSite.region} · ${selectedMissionSite.mission}`}
@@ -1018,6 +1090,8 @@ export default function App() {
           )}
 
           {activeTab === 'data' && (
+            <>
+            <DataProvenancePanel missionSite={selectedMissionSite} terrain={terrain} sources={datasets} />
             <DataExplorer
               missionSite={selectedMissionSite}
               terrainLoaded={Boolean(terrain && isVerifiedRealTerrain(terrain, selectedMissionSiteId))}
@@ -1044,9 +1118,29 @@ export default function App() {
                 setGoal(nextGoal);
               }}
             />
+            </>
           )}
         </aside>
       </main>
+      {hudOpen && (
+        <AstronautHud
+          mode={hudMode}
+          onModeChange={setHudMode}
+          onClose={() => setHudOpen(false)}
+          siteName={selectedMissionSite.region}
+          terrain={terrain}
+          route={selected ?? null}
+          start={start}
+          goal={goal}
+          currentPosition={evaPosition}
+          progressIndex={evaIndex}
+          targets={scienceTargets}
+          selectedTargetIds={selectedScienceTargetIds}
+          oxygenRemainingL={Math.max(0, oxygenBudget - elapsedOxygenL)}
+          energyRemainingWh={Math.max(0, energyBudgetWh - elapsedEnergyWh)}
+          evaMinutesRemaining={remainingEVAClockMin}
+        />
+      )}
       <footer className="app-footer flex items-center justify-between"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain ? 'IMPORTED MARS DEM · SOURCE HASHED' : 'NO REAL DEM LOADED'}</span><span>NOT FOR OPERATIONAL USE</span></footer>
     </div>
   );

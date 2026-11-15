@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { MissionEvent, Point, Route } from '../types';
+import type { MissionEvent, Point, Route, Target } from '../types';
 
 type Props = {
   events: MissionEvent[];
@@ -10,6 +10,7 @@ type Props = {
   selectedRoute: Route | null;
   onExportReplay: () => void;
   exporting: boolean;
+  scienceTargets?: Target[];
 };
 
 function isPoint(value: unknown): value is Point {
@@ -30,7 +31,7 @@ function formatMetric(value: unknown, unit: string): string {
 function humanize(value: string): string { return value.replace(/_/g, ' '); }
 
 export default function MissionReplay({
-  events, terrainWidth, terrainHeight, siteName, selectedRouteId, selectedRoute, onExportReplay, exporting,
+  events, terrainWidth, terrainHeight, siteName, selectedRouteId, selectedRoute, onExportReplay, exporting, scienceTargets = [],
 }: Props) {
   const [eventIndex, setEventIndex] = useState(Math.max(0, events.length - 1));
   const [frame, setFrame] = useState(0);
@@ -100,15 +101,30 @@ export default function MissionReplay({
         <h3>Mission Replay & Summary</h3>
         <p>Scrub decisions and replanning events, then inspect before-and-after route geometry.</p>
       </div>
-      <button className="replay-export-button" onClick={onExportReplay} disabled={exporting}>
-        {exporting ? 'PREPARING…' : 'EXPORT REPLAY REPORT'}
-      </button>
+      <div className="replay-action-group">
+        <button className="replay-export-button" onClick={onExportReplay} disabled={exporting}>
+          {exporting ? 'PREPARING…' : 'EXPORT MISSION JSON'}
+        </button>
+        <button className="replay-print-button" onClick={() => window.print()}>PRINT DEBRIEF</button>
+      </div>
     </div>
     <div className="mission-summary-grid">
       <div className="mission-summary-stat"><span>MISSION STATE</span><strong>{status}</strong><small>{events.length} recorded events</small></div>
       <div className="mission-summary-stat"><span>SELECTED ROUTE</span><strong>{selectedRouteId}</strong><small>{selectedRoute?.name ?? 'No route selected'}</small></div>
       <div className="mission-summary-stat"><span>FINAL DISTANCE</span><strong>{formatMetric(selectedRoute?.metrics.distance_m, 'm')}</strong><small>Current selected-route estimate</small></div>
       <div className="mission-summary-stat"><span>DECISION / REPLAN LOG</span><strong>{hasJev ? 'JEV + ' : ''}{replanCount} REPLANS</strong><small>{hasJev ? 'Adaptive decision captured' : 'Static route priorities'}</small></div>
+    </div>
+    <div className="mission-debrief-metrics">
+      <div><span>PLANNED DURATION</span><strong>{formatMetric(selectedRoute?.metrics.duration_min, 'min')}</strong></div>
+      <div><span>MODELLED ENERGY</span><strong>{formatMetric(selectedRoute?.metrics.energy_wh, 'Wh')}</strong></div>
+      <div><span>TERRAIN RISK INDEX</span><strong>{formatMetric(selectedRoute?.metrics.terrain_risk_pct, '%')}</strong></div>
+      <div><span>UNCERTAINTY INDEX</span><strong>{formatMetric(selectedRoute?.metrics.uncertainty_pct, '%')}</strong></div>
+      <div><span>RETURN CONSTRAINT</span><strong>{selectedRoute ? (selectedRoute.metrics.return_feasible ? 'FEASIBLE' : 'LIMIT EXCEEDED') : 'N/A'}</strong></div>
+      <div><span>SCIENCE VALUE INDEX</span><strong>{formatMetric(selectedRoute?.metrics.scientific_value_pct, '%')}</strong></div>
+    </div>
+    <div className="mission-objective-summary">
+      <div><span className="eyebrow">MISSION OBJECTIVES</span><strong>{scienceTargets.length ? `${scienceTargets.length} selected science target(s)` : 'No scientific target selected'}</strong></div>
+      <div className="mission-objective-chips">{scienceTargets.map((target) => <span key={target.id}>{target.name} <small>({target.evidence_status.replace(/_/g, ' ')})</small></span>)}</div>
     </div>
     <div className="mission-replay-body">
       <div className="replay-visual">
