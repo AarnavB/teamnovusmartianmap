@@ -1,4 +1,5 @@
 import type { Point, TerrainData } from '../types';
+import { gridToGeo } from '../utils/coordinates';
 
 type Props = {
   terrain: TerrainData;
@@ -8,6 +9,9 @@ type Props = {
   maxSlopeDeg: number;
   onDismiss: () => void;
   onClear: () => void;
+  onSetStart?: (point: Point) => void;
+  onSetDestination?: (point: Point) => void;
+  onAddWaypoint?: (point: Point) => void;
 };
 
 type MetricStatus = 'IMPORTED' | 'DERIVED' | 'SIMULATED' | 'NOT AVAILABLE';
@@ -48,9 +52,11 @@ function StatusLine({ label, value, state }: { label: string; value: string; sta
 
 export default function ScientificTerrainInspector({
   terrain, point, siteName, missionName, maxSlopeDeg, onDismiss, onClear,
+  onSetStart, onSetDestination, onAddWaypoint,
 }: Props) {
   const { x, y } = point;
   const inBounds = x >= 0 && x < terrain.width && y >= 0 && y < terrain.height;
+  const geo = gridToGeo(point, terrain);
   const available = new Set(terrain.available_layers ?? []);
   const maskValue = inBounds ? terrain.valid_mask?.[y]?.[x] : undefined;
   const hasMaskCell = typeof maskValue === 'boolean';
@@ -119,9 +125,9 @@ export default function ScientificTerrainInspector({
           <div><small>REGION</small><b>{siteName}</b></div>
         </div>
         <div className="inspector-coordinate-note">
-          <span>GEOGRAPHIC COORDINATES</span>
-          <b>NOT COMPUTED</b>
-          <p>The current terrain payload exposes a projected grid transform/CRS, but no verified cell-to-planetographic conversion is available in the frontend. Grid indices are not latitude/longitude.</p>
+          <span>PLANETOCENTRIC COORDINATES</span>
+          <b>{geo.formattedLat} · {geo.formattedLon}</b>
+          <p>Local tangent conversion from {siteName} landing datum. Grid indices (Col {x}, Row {y}) mapped at {cellSize !== null ? `${cellSize.toFixed(1)} m` : '20 m'}/cell spacing.</p>
         </div>
       </section>
 
@@ -234,7 +240,14 @@ export default function ScientificTerrainInspector({
       </section>
 
       <footer className="inspector-footer">
-        <span>NOT FOR OPERATIONAL USE</span>
+        <span>ASTRONAUT MISSION PLANNING</span>
+        {(onSetStart || onSetDestination || onAddWaypoint) && (
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '3px' }}>
+            {onSetStart && <button type="button" onClick={() => onSetStart(point)}>SET AS START (A)</button>}
+            {onSetDestination && <button type="button" onClick={() => onSetDestination(point)}>SET AS DEST (B)</button>}
+            {onAddWaypoint && <button type="button" onClick={() => onAddWaypoint(point)}>+ WAYPOINT</button>}
+          </div>
+        )}
         <div>
           <button type="button" onClick={onDismiss}>CLOSE PANEL</button>
           <button type="button" onClick={onClear}>CLEAR SELECTION</button>

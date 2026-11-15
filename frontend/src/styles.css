@@ -1148,3 +1148,323 @@ input, select, textarea { color-scheme: dark; }
   .inspector-selected-card { gap: 6px; padding: 8px; }
   .inspector-section-heading span:last-child { display: none; }
 }
+
+/* Coordinate Input Modal */
+.coord-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(10, 15, 17, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.coord-modal-panel {
+  width: 100%;
+  max-width: 480px;
+  background: #141c1e;
+  border: 1px solid #334446;
+  border-radius: 6px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(110, 180, 170, 0.12);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: coordModalFadeIn 0.18s ease-out;
+}
+@keyframes coordModalFadeIn {
+  from { opacity: 0; transform: scale(0.97) translateY(-6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.coord-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid #233134;
+  background: rgba(255, 255, 255, 0.015);
+}
+.coord-modal-header h3 {
+  margin: 4px 0 3px;
+  font-size: 13px;
+  font-family: 'DM Mono', monospace;
+  letter-spacing: 0.05em;
+  color: #f0f3eb;
+}
+.coord-modal-header p {
+  margin: 0;
+  font-size: 8px;
+  color: #7b8e8b;
+  line-height: 1.45;
+}
+.coord-modal-close {
+  background: none;
+  border: none;
+  color: #778d8a;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.coord-modal-close:hover {
+  color: #e2ede8;
+}
+.coord-mode-tabs {
+  display: flex;
+  background: #0f1618;
+  border-bottom: 1px solid #233134;
+  padding: 3px;
+  gap: 3px;
+}
+.coord-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #798c88;
+  font: 500 8.5px/1 'DM Mono', monospace;
+  letter-spacing: 0.08em;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+}
+.coord-tab.active {
+  background: #202d30;
+  color: #9ee0d1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+.coord-form-body {
+  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.coord-input-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.coord-input-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.coord-input-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.coord-input-row label span {
+  font: 500 7.5px 'DM Mono', monospace;
+  color: #8fa59f;
+  letter-spacing: 0.06em;
+}
+.coord-input-row label span i {
+  color: #637772;
+  font-style: normal;
+  margin-left: 3px;
+}
+.coord-input-row label input {
+  height: 32px;
+  background: #0f1719;
+  border: 1px solid #2c3e40;
+  border-radius: 4px;
+  padding: 0 9px;
+  color: #f1f4ed;
+  font: 600 11px 'DM Mono', monospace;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.coord-input-row label input:focus {
+  border-color: #6fbab0;
+  box-shadow: 0 0 0 1px rgba(111, 186, 176, 0.25);
+}
+.coord-input-row label small {
+  font: 7px 'DM Mono', monospace;
+  color: #6b827e;
+  margin-top: 2px;
+}
+.coord-slider-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid #233134;
+  border-radius: 4px;
+}
+.coord-slider-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.coord-slider-item small {
+  font: 7px 'DM Mono', monospace;
+  color: #889e98;
+}
+.coord-action-bar-sub {
+  display: flex;
+  justify-content: flex-end;
+}
+.coord-action-bar-sub .tiny-action {
+  color: #79a59f;
+}
+.coord-preview-card {
+  padding: 10px 12px;
+  background: #0e1517;
+  border: 1px solid #28393c;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.coord-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(82, 110, 106, 0.2);
+  padding-bottom: 6px;
+}
+.coord-preview-header span {
+  font: 500 7px 'DM Mono', monospace;
+  color: #78908b;
+  letter-spacing: 0.08em;
+}
+.coord-preview-header strong.status-ok {
+  font: 600 7.5px 'DM Mono', monospace;
+  color: #8edecb;
+}
+.coord-preview-header strong.status-err {
+  font: 600 7.5px 'DM Mono', monospace;
+  color: #e28775;
+}
+.coord-preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+.coord-preview-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.coord-preview-grid small {
+  font: 6.5px 'DM Mono', monospace;
+  color: #6a827d;
+  letter-spacing: 0.06em;
+}
+.coord-preview-grid b {
+  font: 500 8.5px 'DM Mono', monospace;
+  color: #dce7df;
+}
+.coord-warning-box {
+  padding: 7px 9px;
+  background: rgba(189, 78, 56, 0.12);
+  border: 1px solid #753b2f;
+  border-radius: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.coord-warning-box span {
+  color: #f0a293;
+  font-size: 7.5px;
+  line-height: 1.4;
+}
+.coord-warning-box button {
+  align-self: flex-start;
+  padding: 3px 6px;
+  font: 7px 'DM Mono', monospace;
+  background: #50271f;
+  border: 1px solid #914838;
+  color: #fce2dc;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.coord-terrain-warning {
+  padding: 6px 8px;
+  background: rgba(217, 141, 88, 0.1);
+  border: 1px solid #6b4c34;
+  border-radius: 3px;
+  color: #ebb88f;
+  font-size: 7.5px;
+  line-height: 1.4;
+}
+.coord-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.coord-modal-footer .primary-button {
+  margin-top: 0;
+  height: 32px;
+  padding: 0 14px;
+}
+.coord-modal-footer .ghost-button {
+  margin-top: 0;
+  height: 32px;
+  padding: 0 12px;
+}
+
+/* Waypoint enhancements */
+.waypoint-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.waypoint-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.waypoint-info span {
+  font-size: 8px;
+  font-weight: 500;
+  color: #a8ebd6;
+}
+.waypoint-info small {
+  font-size: 6.5px;
+  color: #789991;
+  font-family: 'DM Mono', monospace;
+}
+.waypoint-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.waypoint-actions button {
+  background: transparent;
+  border: none;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 2px;
+}
+.waypoint-actions button.btn-edit {
+  color: #76b6ab;
+}
+.waypoint-actions button.btn-edit:hover {
+  color: #a8faec;
+  background: rgba(118, 182, 171, 0.15);
+}
+.waypoint-actions button.btn-remove {
+  color: #e27d6d;
+}
+.waypoint-actions button.btn-remove:hover {
+  color: #ff9d8f;
+  background: rgba(226, 125, 109, 0.15);
+}
+.coord-card-interactive {
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.coord-card-interactive:hover {
+  border-color: #4b676a;
+  background: #1c2729;
+}
