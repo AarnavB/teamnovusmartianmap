@@ -137,6 +137,7 @@ class Label:
     costs: tuple[float, ...]
     parent: int | None
     alive: bool = True
+    diversity_cost: float = 0.0
 
 
 class MultiObjectiveAStar:
@@ -149,7 +150,16 @@ class MultiObjectiveAStar:
     result an explicitly approximate Pareto search rather than an exact full
     frontier enumeration.
     """
-    def __init__(self, terrain: Terrain, constraints: MissionConstraints, profile: str, max_labels_per_cell: int = 3, edge_cache: dict[tuple[int, int, int, int], tuple[float, ...] | None] | None = None):
+    def __init__(
+        self,
+        terrain: Terrain,
+        constraints: MissionConstraints,
+        profile: str,
+        max_labels_per_cell: int = 3,
+        edge_cache: dict[tuple[int, int, int, int], tuple[float, ...] | None] | None = None,
+        diversity_penalties: dict[tuple[int, int], float] | None = None,
+        diversity_strength: float = 0.0,
+    ):
         if profile not in PROFILES:
             raise ValueError(f"Unknown route profile: {profile}")
         self.terrain = terrain
@@ -186,6 +196,10 @@ class MultiObjectiveAStar:
         # The route profiles share edge vectors; terrain/constraint calculations
         # are identical even though the three profiles use different weights.
         self.edge_cache = edge_cache if edge_cache is not None else {}
+        # Diversity is a soft search preference only. It never changes terrain
+        # validity or the time, energy, and oxygen resource checks.
+        self.diversity_penalties = diversity_penalties or {}
+        self.diversity_strength = max(0.0, float(diversity_strength))
         self.edge_cache_hits = 0
         self.edge_cache_misses = 0
         self.expanded = 0
@@ -337,6 +351,13 @@ class MultiObjectiveAStar:
                 if edge is None:
                     continue
                 new_costs = tuple(a + b for a, b in zip(label.costs, edge))
+                step_distance_fraction = (
+                    math.hypot(dx, dy) * self.terrain.cell_m
+                    / max(self.terrain.max_path_distance_m, 1.0)
+                )
+                new_diversity_cost = label.diversity_cost + (
+                    self.diversity_penalties.get((nx, ny), 0.0) * step_distance_fraction
+                )
                 if not self._within_resource_limits(new_costs):
                     continue
                 key = (nx, ny)
@@ -348,16 +369,22 @@ class MultiObjectiveAStar:
                         labels[i].alive = False
 
                 current_ids[:] = [i for i in current_ids if labels[i].alive]
-                candidate_score = self._weight(new_costs)
+                candidate_score = self._weight(new_costs) + self.diversity_strength * new_diversity_cost
                 if len(current_ids) >= self.max_labels_per_cell:
-                    worst_id = max(current_ids, key=lambda i: self._weight(labels[i].costs))
-                    if candidate_score >= self._weight(labels[worst_id].costs):
+                    worst_id = max(
+                        current_ids,
+                        key=lambda i: self._weight(labels[i].costs) + self.diversity_strength * labels[i].diversity_cost,
+                    )
+                    if candidate_score >= (
+                        self._weight(labels[worst_id].costs)
+                        + self.diversity_strength * labels[worst_id].diversity_cost
+                    ):
                         continue
                     labels[worst_id].alive = False
                     current_ids.remove(worst_id)
 
                 new_id = len(labels)
-                labels.append(Label(nx, ny, new_costs, label_id))
+                labels.append(Label(nx, ny, new_costs, label_id, True, new_diversity_cost))
                 current_ids.append(new_id)
                 self.generated += 1
                 serial += 1
@@ -392,6 +419,8 @@ class MultiObjectiveAStar:
             "pareto_labels_at_goal": len([i for i in at_cell.get(goal, []) if labels[i].alive]),
             "objective_vector": dict(zip(OBJECTIVES, labels[goal_label].costs)),
             "approximate_frontier": True,
+            "diversity_penalty": round(labels[goal_label].diversity_cost, 6),
+            "diversity_strength": self.diversity_strength,
         }
 
 
@@ -483,6 +512,53 @@ def route_metrics(terrain: Terrain, path: list[tuple[int, int]], constraints: Mi
     }
 
 
+def _path_xy(path: list[Any]) -> list[tuple[int, int]]:
+    points: list[tuple[int, int]] = []
+    for point in path:
+        if isinstance(point, dict):
+            points.append((int(point["x"]), int(point["y"])))
+        else:
+            points.append((int(point[0]), int(point[1])))
+    return points
+
+
+def _corridor_overlap_pct(path: list[Any], other_path: list[Any], radius_cells: float = 1.5) -> float:
+    """Share of path cells lying within a narrow corridor of another path."""
+    points = _path_xy(path)
+    other = _path_xy(other_path)
+    if not points or not other:
+        return 0.0
+    radius_sq = radius_cells * radius_cells
+    shared = sum(
+        1 for x, y in points
+        if any((x - ox) ** 2 + (y - oy) ** 2 <= radius_sq for ox, oy in other)
+    )
+    return 100.0 * shared / len(points)
+
+
+def _build_diversity_penalties(routes: list[dict[str, Any]], terrain: Terrain) -> dict[tuple[int, int], float]:
+    """Create a soft, decaying penalty around already selected route corridors."""
+    penalties: dict[tuple[int, int], float] = {}
+    for route in routes:
+        for x, y in _path_xy(route.get("path", [])):
+            for dy in range(-3, 4):
+                for dx in range(-3, 4):
+                    nx, ny = x + dx, y + dy
+                    if not terrain.in_bounds(nx, ny):
+                        continue
+                    distance = math.hypot(dx, dy)
+                    if distance <= 1.0:
+                        influence = 1.0
+                    elif distance <= 2.0:
+                        influence = 0.65
+                    elif distance <= 3.0:
+                        influence = 0.25
+                    else:
+                        continue
+                    penalties[(nx, ny)] = max(penalties.get((nx, ny), 0.0), influence)
+    return penalties
+
+
 def build_route_set(terrain: Terrain, start: tuple[int, int], goal: tuple[int, int], constraints: MissionConstraints) -> list[dict[str, Any]]:
     labels = {
         "conservative": ("A", "CONSERVATIVE", "Risk-and-uncertainty weighted alternative"),
@@ -491,10 +567,8 @@ def build_route_set(terrain: Terrain, start: tuple[int, int], goal: tuple[int, i
     }
     routes: list[dict[str, Any]] = []
     profile_errors: list[str] = []
-    # The three profiles search the same graph with different scalar weights.
-    # Reuse edge vectors between them and cap the approximate Pareto frontier
-    # at three labels per cell to reduce repeated work and memory use.
     shared_edge_cache: dict[tuple[int, int, int, int], tuple[float, ...] | None] = {}
+
     for profile, (route_id, title, summary) in labels.items():
         model = MultiObjectiveAStar(
             terrain, constraints, profile,
@@ -507,26 +581,128 @@ def build_route_set(terrain: Terrain, start: tuple[int, int], goal: tuple[int, i
         except ValueError as exc:
             profile_errors.append(f"{profile}: {exc}")
             continue
-        search["runtime_ms"] = round((perf_counter() - started) * 1000.0, 2)
-        search["edge_cache_hits"] = model.edge_cache_hits
-        search["edge_cache_misses"] = model.edge_cache_misses
-        search["max_labels_per_cell"] = model.max_labels_per_cell
-        metrics = route_metrics(terrain, search["path"], constraints)
+        base_metrics = route_metrics(terrain, search["path"], constraints)
+        chosen_search = search
+        chosen_model = model
+        chosen_metrics = base_metrics
+        chosen_overlap = max(
+            (_corridor_overlap_pct(search["path"], route["path"]) for route in routes),
+            default=0.0,
+        )
+
+        # Only spend extra search time when a profile collapses onto a corridor
+        # already represented. The penalty is soft and bounded; hard terrain
+        # constraints and resource budgets remain enforced by MultiObjectiveAStar.
+        if routes and chosen_overlap >= 60.0:
+            penalties = _build_diversity_penalties(routes, terrain)
+            for strength in (0.28, 0.48, 0.68):
+                diversified_model = MultiObjectiveAStar(
+                    terrain, constraints, profile,
+                    max_labels_per_cell=3,
+                    edge_cache=shared_edge_cache,
+                    diversity_penalties=penalties,
+                    diversity_strength=strength,
+                )
+                try:
+                    candidate_search = diversified_model.search(start, goal)
+                except ValueError:
+                    continue
+                candidate_metrics = route_metrics(terrain, candidate_search["path"], constraints)
+                # Never trade away return feasibility. Also avoid a visually
+                # distinct but operationally disproportionate detour.
+                if not candidate_metrics["return_feasible"]:
+                    continue
+                if candidate_metrics["distance_m"] > max(base_metrics["distance_m"] * 1.35, base_metrics["distance_m"] + terrain.cell_m * 2):
+                    continue
+                if candidate_metrics["duration_min"] > max(base_metrics["duration_min"] * 1.35, base_metrics["duration_min"] + 2.0):
+                    continue
+                candidate_overlap = max(
+                    (_corridor_overlap_pct(candidate_search["path"], route["path"]) for route in routes),
+                    default=0.0,
+                )
+                if candidate_overlap + 2.0 < chosen_overlap:
+                    chosen_overlap = candidate_overlap
+                    chosen_search = candidate_search
+                    chosen_model = diversified_model
+                    chosen_metrics = candidate_metrics
+
+        runtime_ms = round((perf_counter() - started) * 1000.0, 2)
+        chosen_search["runtime_ms"] = runtime_ms
+        chosen_search["edge_cache_hits"] = chosen_model.edge_cache_hits
+        chosen_search["edge_cache_misses"] = chosen_model.edge_cache_misses
+        chosen_search["max_labels_per_cell"] = chosen_model.max_labels_per_cell
         science_available = "science" in terrain.available_layers and terrain.science_potential is not None
         display_title = ("JEV-ADAPTIVE" if profile == "balanced" and constraints.objective_weights else title) if science_available or profile != "science_first" else "SCIENCE-FIRST (NO SCIENCE LAYER)"
         display_summary = summary if science_available or profile != "science_first" else "No georeferenced science-potential layer is loaded. This profile is a baseline alternative, not a science-target route."
         routes.append({
-            "id": route_id, "profile": profile, "name": display_title, "summary": display_summary,
-            "path": [{"x": x, "y": y} for x, y in search["path"]],
-            "metrics": metrics,
-            "search": {k: v for k, v in search.items() if k != "path"},
-            "weights": model.weights,
+            "id": route_id,
+            "profile": profile,
+            "name": display_title,
+            "summary": display_summary,
+            "path": [{"x": x, "y": y} for x, y in chosen_search["path"]],
+            "metrics": chosen_metrics,
+            "search": {k: v for k, v in chosen_search.items() if k != "path"},
+            "weights": chosen_model.weights,
             "weight_source": "jev" if profile == "balanced" and constraints.objective_weights else "static_profile",
             "weight_policy_version": "jev-weighted-a-star-1.0.0" if profile == "balanced" and constraints.objective_weights else None,
         })
+
     if not routes:
         detail = profile_errors[0] if profile_errors else "No profile produced a feasible path."
         raise ValueError(detail)
+
+    shortest = min(routes, key=lambda route: route["metrics"]["distance_m"])
+    fastest = min(routes, key=lambda route: route["metrics"]["duration_min"])
+    risk_routes = [route for route in routes if route["metrics"].get("terrain_risk_pct") is not None]
+    safest = min(risk_routes, key=lambda route: route["metrics"]["terrain_risk_pct"]) if risk_routes else None
+    science_routes = [route for route in routes if route["metrics"].get("scientific_value_pct") is not None]
+    science_best = max(science_routes, key=lambda route: route["metrics"]["scientific_value_pct"]) if science_routes else None
+
+    for route in routes:
+        others = [other for other in routes if other is not route]
+        overlap = max(
+            (_corridor_overlap_pct(route["path"], other["path"]) for other in others),
+            default=0.0,
+        )
+        route["diversity"] = {
+            "max_corridor_overlap_pct": round(overlap, 1),
+            "unique_corridor_pct": round(max(0.0, 100.0 - overlap), 1),
+            "label": "DISTINCT CORRIDOR" if overlap < 45.0 else "PARTIAL OVERLAP" if overlap < 75.0 else "SHARED SAFE CORRIDOR",
+        }
+
+        metrics = route["metrics"]
+        distance_delta = max(0.0, metrics["distance_m"] - shortest["metrics"]["distance_m"])
+        distance_delta_pct = 100.0 * distance_delta / max(shortest["metrics"]["distance_m"], 1.0)
+        risk_delta = (
+            metrics["terrain_risk_pct"] - safest["metrics"]["terrain_risk_pct"]
+            if safest is not None else None
+        )
+        if route is safest and route is shortest:
+            tradeoff = "Shortest and lowest terrain-risk score among the feasible alternatives."
+        elif route is safest:
+            tradeoff = f"Lowest terrain-risk score; accepts {distance_delta_pct:.0f}% more distance than the shortest alternative."
+        elif route is shortest:
+            tradeoff = (
+                f"Shortest traverse; terrain-risk score is {risk_delta:.1f} points above the lowest-risk alternative."
+                if risk_delta is not None and risk_delta > 0.5
+                else "Shortest traverse with no material terrain-risk penalty versus the available alternatives."
+            )
+        elif route is fastest:
+            tradeoff = "Fastest modeled traverse; compare its terrain-risk and resource margin before selection."
+        elif route is science_best:
+            tradeoff = f"Highest available science-potential score; adds {distance_delta_pct:.0f}% distance versus the shortest alternative."
+        elif route["weight_source"] == "jev":
+            tradeoff = "JEV-adaptive compromise using the returned mission priorities; not a safety override."
+        else:
+            tradeoff = "Alternative objective balance; inspect the metrics and corridor overlap before selection."
+        route["tradeoff_summary"] = tradeoff
+        route["diversity"]["interpretation"] = (
+            "A substantially different route corridor was found."
+            if overlap < 45.0
+            else "This path shares some terrain corridor with another option."
+            if overlap < 75.0
+            else "The terrain and hard constraints appear to leave only one practical safe corridor."
+        )
 
     for route in routes:
         route["is_pareto"] = not any(
