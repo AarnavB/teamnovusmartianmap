@@ -35,7 +35,7 @@ from .services.dem_cache import DemSourceError, DemValidationError, DemCacheErro
 
 app = FastAPI(
     title="MARSCOPE API",
-    version="0.3.1",
+    version="0.4.0",
     description="Research prototype for Mars human-traversal route-planning concepts. It is not certified navigation software.",
 )
 def _configured_cors_origins() -> list[str]:
@@ -125,7 +125,7 @@ def jezero_pois() -> dict[str, Any]:
             "documentation": "https://astrogeology.usgs.gov/search/map/mars_2020_science_investigation_ctx_dem_mosaic",
             "pixel_scale_m": 20,
             "format": "GeoTIFF",
-            "vertical_units": "metres (verify source label before import)",
+            "vertical_units": "metres (USGS source metadata)",
         },
         "points": [
             {"id": "jezero-centre", "name": "Jezero Crater Centre", "latitude": 18.4100, "longitude_east": 77.6900, "precision": "approximate reference point", "description": "Regional reference point for the Jezero study area."},
@@ -138,7 +138,7 @@ def jezero_pois() -> dict[str, Any]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "project": "MARSCOPE", "release": "0.3.1"}
+    return {"status": "ok", "project": "MARSCOPE", "release": "0.4.0"}
 
 @app.get("/api/terrain")
 def terrain() -> dict[str, Any]:
