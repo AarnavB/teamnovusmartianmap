@@ -1027,7 +1027,6 @@ export default function App() {
                 </header>
                 <div className="data-modal-meta"><span><i /> LIVE DATA INTERFACE</span><span>{datasets.length} CATALOGUED SOURCES</span><span>{terrain ? 'TERRAIN LOADED' : 'AWAITING TERRAIN'}</span></div>
                 <div className="data-modal-body">
-            {dataMenuOpen && (
               <DataExplorer
                 missionSite={selectedMissionSite}
                 terrainLoaded={Boolean(terrain && isVerifiedRealTerrain(terrain, selectedMissionSiteId))}
