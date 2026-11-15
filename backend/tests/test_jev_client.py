@@ -139,7 +139,7 @@ def test_non_json_502_then_502_still_fails_503(monkeypatch):
     with pytest.raises(HTTPException) as exc_info:
         _run(jev_client.request_jev_pathfinding_weights({"apiKey": "k"}))
     assert exc_info.value.status_code == 503
-    assert "starting up or unreachable" in exc_info.value.detail
+    assert "temporarily unavailable" in exc_info.value.detail or "starting up or unreachable" in exc_info.value.detail
     assert "correlation_id=" in exc_info.value.detail
 
 

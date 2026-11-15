@@ -137,6 +137,7 @@ def test_jev_status_endpoint_reports_config_and_last_success_without_secrets(mon
     body = response.json()
     assert body["configured"] is True
     assert body["reachable"] is True
+    assert body["ready"] is True
     assert body["reachability"]["service_ready"] is True
     assert body["last_success"]["model"] == "test-model"
     assert body["last_success"]["correlation_id"] == "abc12345"

@@ -413,11 +413,17 @@ async def jev_status(response: Response) -> dict[str, Any]:
     response.headers["Pragma"] = "no-cache"
     config = jev_service_config()
     reachability = await probe_jev_reachability()
+    ready = (
+        bool(config["configured"])
+        and bool(reachability.get("reachable"))
+        and bool(reachability.get("service_ready"))
+    )
     return {
         "configured": config["configured"],
         "service_url": config["service_url"],
         "token_configured": config["token_configured"],
         "reachable": reachability.get("reachable", False),
+        "ready": ready,
         "reachability": reachability,
         "last_success": last_successful_evaluation(),
     }
