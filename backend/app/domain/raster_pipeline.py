@@ -48,6 +48,44 @@ def inspect_geotiff(path: Path) -> dict[str, Any]:
         }
 
 
+def validate_site_coverage(path: Path, *, latitude: float, longitude_east: float) -> dict[str, Any]:
+    """Require the uploaded raster footprint to contain the selected site's reference point."""
+    try:
+        import rasterio
+        from pyproj import Transformer
+    except ImportError as exc:
+        raise RuntimeError("Install rasterio and pyproj before importing georeferenced Mars terrain.") from exc
+
+    with rasterio.open(path) as src:
+        if src.crs is None or not src.crs.is_projected:
+            raise ValueError("The DEM must contain a projected planetary CRS. A filename or browse image is not georeferencing.")
+        if str(src.crs.linear_units).lower() not in {"metre", "meter", "meters", "metres"}:
+            raise ValueError("The DEM's projected CRS must use metres.")
+        geographic = src.crs.geodetic_crs
+        if geographic is None:
+            raise ValueError("The raster CRS does not expose a geographic base CRS, so its footprint cannot be verified against the mission-site coordinate.")
+        transformer = Transformer.from_crs(geographic, src.crs, always_xy=True)
+        candidates = [longitude_east]
+        # Planetary products use both 0–360 east-positive and -180–180
+        # longitude domains. Test the equivalent coordinate in both domains.
+        candidates.append(longitude_east - 360.0 if longitude_east > 180.0 else longitude_east + 360.0)
+        for longitude in candidates:
+            x, y = transformer.transform(longitude, latitude)
+            if src.bounds.left <= x <= src.bounds.right and src.bounds.bottom <= y <= src.bounds.top:
+                return {
+                    "reference_latitude_planetocentric": latitude,
+                    "reference_longitude_east": longitude_east,
+                    "reference_longitude_transformed": longitude,
+                    "projected_reference_xy_m": [float(x), float(y)],
+                    "raster_bounds_m": [float(src.bounds.left), float(src.bounds.bottom), float(src.bounds.right), float(src.bounds.top)],
+                    "coverage_verified": True,
+                }
+        raise ValueError(
+            "The uploaded DEM footprint does not contain this mission site's reference coordinate. "
+            "Choose a product covering the selected site; do not attach another site's raster."
+        )
+
+
 def _local_std(array: np.ndarray) -> np.ndarray:
     padded = np.pad(array, 1, mode="edge")
     windows = [padded[dy:dy + array.shape[0], dx:dx + array.shape[1]] for dy in range(3) for dx in range(3)]
@@ -56,79 +94,127 @@ def _local_std(array: np.ndarray) -> np.ndarray:
 
 
 def dem_to_terrain(path: Path, *, width: int = 96, height: int = 96, vertical_units: str = "m") -> tuple[Any, dict[str, Any]]:
-    """Convert a metric-projected DEM to route grid; unknown fields remain explicitly unknown.
+    """Convert a verified, metric-projected Mars elevation raster to the route grid.
 
-    DEM pixel coordinates are interpreted only when CRS is projected with metre units.
+    This importer derives only elevation, slope and local roughness. It does not
+    create substitute soil, temperature, radiation, atmosphere, uncertainty or
+    science values when those source layers are absent.
     """
     try:
         import rasterio
         from rasterio.enums import Resampling
     except ImportError as exc:
-        raise RuntimeError("Install backend/requirements-geospatial.txt before importing raster terrain.") from exc
+        raise RuntimeError("Install backend/requirements-geospatial.txt before importing Mars terrain.") from exc
     from ..terrain import Terrain
 
     info = inspect_geotiff(path)
     if not info["is_projected"] or str(info["linear_units"]).lower() not in {"metre", "meter", "meters", "metres"}:
-        raise ValueError("DEM must already be in a projected CRS with metre units. Reproject using a Mars planetary CRS before import.")
+        raise ValueError("DEM must already be in a projected Mars CRS with metre units. Reproject from the original planetary label before import.")
     if not info["mars_reference_ellipsoid_check"]:
-        raise ValueError("DEM CRS ellipsoid does not match the Mars reference ellipsoid range. This importer rejects Earth/unknown-body rasters instead of treating them as Mars coordinates.")
+        raise ValueError("DEM CRS ellipsoid does not match the Mars reference ellipsoid range. Earth or unknown-body rasters are rejected.")
     if vertical_units != "m":
-        raise ValueError("This import path currently accepts DEM vertical units in metres only. Convert using a documented scale factor before ingesting.")
+        raise ValueError("This import path accepts DEM vertical units in metres only. Verify the original product label before import.")
     if info["band_count"] < 1:
         raise ValueError("DEM has no raster bands.")
+
     with rasterio.open(path) as src:
         if src.units and src.units[0]:
             band_unit = str(src.units[0]).strip().lower()
             if band_unit not in {"m", "meter", "meters", "metre", "metres"}:
-                raise ValueError(f"DEM band metadata declares vertical units {src.units[0]!r}, not metres. Convert the data explicitly and preserve the scale factor.")
+                raise ValueError(f"DEM band metadata declares unit {src.units[0]!r}, not metres. Convert explicitly using the source label.")
         masked = src.read(1, out_shape=(height, width), masked=True, resampling=Resampling.bilinear)
         z = np.asarray(masked.filled(np.nan), dtype=np.float64)
         mask = np.ma.getmaskarray(masked) | ~np.isfinite(z)
         if np.all(mask):
             raise ValueError("DEM contains no valid elevation cells.")
-        # No-data is never filled with a made-up height; it becomes a blocked cell.
-        fill_value = float(np.nanmedian(z))
-        z_filled = np.where(mask, fill_value, z)
         if abs(src.transform.b) > 1e-9 or abs(src.transform.d) > 1e-9:
-            raise ValueError("Rotated GeoTIFF grids are not supported in this DEM importer. Warp to a north-up projected grid first.")
+            raise ValueError("Rotated raster grids are not supported. Warp the verified source raster to a north-up projected grid first.")
         x_res = abs(src.transform.a) * (src.width / width)
         y_res = abs(src.transform.e) * (src.height / height)
         cell_m = float((x_res + y_res) / 2.0)
         if not math.isfinite(cell_m) or cell_m <= 0:
             raise ValueError("DEM has invalid metric pixel spacing.")
 
-    gy, gx = np.gradient(z_filled, cell_m, cell_m)
-    slope = np.degrees(np.arctan(np.hypot(gx, gy)))
-    roughness_m = _local_std(z_filled)
-    valid_ratio = float((~mask).sum() / mask.size)
-    # Missing spatially resolved environment/radiation/soil/science data are NOT zero-risk.
-    # Their placeholders are explicitly listed as unavailable and receive uncertainty cost.
-    unknown = np.full((height, width), 0.65, dtype=np.float64)
-    roughness_norm = np.clip(roughness_m / max(float(np.nanpercentile(roughness_m[~mask], 95)), 1e-6), 0, 1)
-    obstacle = mask | (slope > 50.0)
+    # Compute derivatives from valid source elevations only. NaNs near a
+    # coverage edge are marked no-go rather than replaced with invented heights.
+    gy, gx = np.gradient(z, cell_m, cell_m)
+    slope_raw = np.degrees(np.arctan(np.hypot(gx, gy)))
+    roughness_raw = _local_std(z)
+    valid = ~mask & np.isfinite(slope_raw) & np.isfinite(roughness_raw)
+    if not valid.any():
+        raise ValueError("The DEM has no valid cells with computable slope and roughness.")
+    valid_ratio = float(valid.sum() / valid.size)
+    roughness_scale = max(float(np.nanpercentile(roughness_raw[valid], 95)), 1e-6)
+    roughness_norm = np.clip(roughness_raw / roughness_scale, 0, 1)
+    obstacle = (~valid) | (slope_raw > 50.0)
+
+    # A display-only fill is applied only to cells already marked blocked.
+    # Such cells are excluded from route search and never treated as measured DEM.
+    display_fill = float(np.nanmedian(z[valid]))
+    elevation_display = np.where(valid, z, display_fill)
+    slope_display = np.where(np.isfinite(slope_raw), slope_raw, 0.0)
+    roughness_display = np.where(np.isfinite(roughness_norm), roughness_norm, 0.0)
     file_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+
     grid = Terrain(
-        width=width, height=height, cell_m=cell_m,
-        elevation_m=z_filled.tolist(), slope_deg=slope.tolist(),
-        roughness=roughness_norm.tolist(), regolith=np.full((height, width), 0.5).tolist(),
-        temperature_c=np.full((height, width), -100.0).tolist(),
-        environment_index=np.full((height, width), 0.5).tolist(),
-        radiation_index=np.full((height, width), 0.5).tolist(),
-        uncertainty=unknown.tolist(), science_potential=np.zeros((height, width)).tolist(),
-        obstacle=obstacle.tolist(), targets=[], seed=0,
-        available_layers={"elevation", "slope", "roughness", "uncertainty", "coverage_mask"},
-        terrain_id=f"imported-dem-{file_hash[:12]}", status="NASA_OR_USER_SUPPLIED_GEOREFERENCED_DEM",
-        warning="Elevation, slope and roughness are derived from the ingested GeoTIFF. Temperature, atmospheric, radiation, regolith and science layers are not connected. Unknown factors are penalized through the uncertainty model. This is not certified navigation data.",
-        cell_units="metres", layer_provenance="Source GeoTIFF metadata retained in raster provenance; slope derived from metric DEM; roughness is local 3x3 standard deviation normalized to the valid-data 95th percentile.",
-        coordinate_info={"crs": info["crs"], "crs_wkt": info["crs_wkt"], "bounds": info["bounds"], "transform": info["transform"], "pixel_spacing_m": [x_res, y_res]},
+        width=width,
+        height=height,
+        cell_m=cell_m,
+        elevation_m=elevation_display.tolist(),
+        slope_deg=slope_display.tolist(),
+        roughness=roughness_display.tolist(),
+        regolith=None,
+        temperature_c=None,
+        environment_index=None,
+        radiation_index=None,
+        uncertainty=None,
+        science_potential=None,
+        obstacle=obstacle.tolist(),
+        targets=[],
+        valid_mask=valid.tolist(),
+        seed=0,
+        available_layers={"elevation", "slope", "roughness", "coverage_mask"},
+        terrain_id=f"imported-dem-{file_hash[:12]}",
+        status="NASA_OR_USER_SUPPLIED_GEOREFERENCED_DEM",
+        warning=(
+            "Real source DEM imported. Elevation is from the raster; slope and relative roughness are derived from it. "
+            "Regolith, temperature, atmosphere, radiation, uncertainty and science-target layers are unavailable and are not fabricated."
+        ),
+        cell_units="metres",
+        layer_provenance=(
+            "Source raster CRS and metadata retained; slope derived from the imported elevation raster; "
+            "roughness is a 3x3 local standard deviation normalized to the valid-data 95th percentile. "
+            "NoData and derivative-invalid cells are blocked."
+        ),
+        coordinate_info={
+            "crs": info["crs"],
+            "crs_wkt": info["crs_wkt"],
+            "bounds": info["bounds"],
+            "transform": info["transform"],
+            "pixel_spacing_m": [x_res, y_res],
+            "coverage_valid_fraction": round(valid_ratio, 6),
+        },
     )
     provenance = {
-        "source": {key: value for key, value in info.items() if key != "path"}, "source_sha256": file_hash, "source_file_name": path.name,
-        "processing": {"resampling": "bilinear to route grid", "route_grid": [width, height], "declared_vertical_units": vertical_units, "source_band_unit": info.get("units", [None])[0], "slope": "atan(sqrt(dz/dx^2 + dz/dy^2))", "roughness": "3x3 local standard deviation", "nodata": "blocked; not interpolated for planning"},
+        "source": {key: value for key, value in info.items() if key != "path"},
+        "source_sha256": file_hash,
+        "source_file_name": path.name,
+        "processing": {
+            "resampling": "bilinear to route grid",
+            "route_grid": [width, height],
+            "declared_vertical_units": vertical_units,
+            "source_band_unit": info.get("units", [None])[0],
+            "slope": "atan(sqrt(dz/dx^2 + dz/dy^2)) on valid raster data",
+            "roughness": "3x3 local standard deviation",
+            "nodata": "blocked; display-only fill is never used for route-cost calculations",
+        },
         "coverage_valid_fraction": round(valid_ratio, 6),
         "layers_created": ["elevation", "slope", "roughness", "coverage_mask"],
-        "layers_unavailable": ["regolith", "temperature", "atmosphere", "radiation", "mineralogy", "science_targets"],
-        "warning": "Confirm product identity, Mars body, datum, latitude/longitude convention, map projection, vertical units, scale and footprint using the original PDS label before operational interpretation.",
+        "layers_unavailable": ["regolith", "temperature", "atmosphere", "radiation", "uncertainty", "mineralogy", "science_targets"],
+        "warning": (
+            "Confirm the source product label, datum, planetary CRS, vertical units, processing level and footprint. "
+            "Rendered elevation is not a certified hazard map or astronaut navigation product."
+        ),
     }
     return grid, provenance
 
@@ -222,12 +308,16 @@ def import_aligned_layer(path: Path, terrain: Any, *, layer: str, value_min: flo
         field = "temperature_c"
         valid = physically_valid
     else:
+        # Missing cells are made no-go rather than filled with a plausible
+        # score. Their placeholder storage value is never available to search.
         values = np.zeros_like(target, dtype=np.float32)
         values[valid] = np.clip((target[valid] - value_min) / (value_max - value_min), 0.0, 1.0)
-        values[~valid] = 0.65
+        terrain.obstacle = (np.asarray(terrain.obstacle, dtype=bool) | ~valid).tolist()
         field = NORMALIZED_LAYER_FIELDS[layer]
     setattr(terrain, field, values.tolist())
-    terrain.uncertainty = np.maximum(np.asarray(terrain.uncertainty), np.where(valid, 0.0, 0.85)).tolist()
+    # Do not synthesize an uncertainty layer when the source DEM had none.
+    # If uncertainty was already loaded, preserve it; if this import is the
+    # uncertainty layer itself, the newly imported values are now available.
     if layer == "temperature_c":
         terrain.available_layers.add("temperature")
     elif layer == "environment_index":
@@ -236,10 +326,12 @@ def import_aligned_layer(path: Path, terrain: Any, *, layer: str, value_min: flo
         terrain.available_layers.add("radiation")
     elif layer == "science_potential":
         terrain.available_layers.add("science")
+    elif layer == "uncertainty":
+        terrain.available_layers.add("uncertainty")
     elif layer == "regolith":
         terrain.available_layers.add("regolith")
     metadata["coverage_valid_fraction"] = round(valid_fraction, 6)
-    metadata["missing_cells_policy"] = "temperature NoData/out-of-range cells are marked as no-go; normalized layers receive a 0.65 placeholder and elevated uncertainty, with coverage fraction retained"
+    metadata["missing_cells_policy"] = "NoData/out-of-range cells are marked as no-go; no guessed hazard, science or uncertainty values are introduced"
     layer_meta = terrain.coordinate_info.setdefault("imported_layer_provenance", {})
     layer_meta[layer] = metadata
     terrain.layer_provenance += f" Additional layer {layer} imported from {path.name}; see coordinate_info.imported_layer_provenance.{layer}."

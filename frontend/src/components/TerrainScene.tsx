@@ -26,12 +26,15 @@ type Latest = Omit<Props, 'terrain'>;
 function layerValue(terrain: TerrainData, layer: Layer, x: number, y: number): number {
   if (layer === 'slope') return Math.min(terrain.slope_deg[y][x] / 32, 1);
   if (layer === 'roughness') return terrain.roughness[y][x];
-  if (layer === 'regolith') return terrain.regolith[y][x];
-  if (layer === 'temperature') return Math.max(0, Math.min(1, (terrain.temperature_c[y][x] + 150) / 200));
-  if (layer === 'environment') return terrain.environment_index[y][x];
-  if (layer === 'radiation') return terrain.radiation_index[y][x];
-  if (layer === 'uncertainty') return terrain.uncertainty[y][x];
-  if (layer === 'science') return terrain.science_potential[y][x];
+  if (layer === 'regolith') return terrain.regolith?.[y]?.[x] ?? 0;
+  if (layer === 'temperature') {
+    const value = terrain.temperature_c?.[y]?.[x];
+    return typeof value === 'number' ? Math.max(0, Math.min(1, (value + 150) / 200)) : 0;
+  }
+  if (layer === 'environment') return terrain.environment_index?.[y]?.[x] ?? 0;
+  if (layer === 'radiation') return terrain.radiation_index?.[y]?.[x] ?? 0;
+  if (layer === 'uncertainty') return terrain.uncertainty?.[y]?.[x] ?? 0;
+  if (layer === 'science') return terrain.science_potential?.[y]?.[x] ?? 0;
   const values = terrain.elevation_m.flat();
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -117,13 +120,19 @@ export default function TerrainScene(props: Props) {
         colors.push(color.r, color.g, color.b);
       }
     }
+    const validMask = props.terrain.valid_mask;
     for (let y = 0; y < height - 1; y++) {
       for (let x = 0; x < width - 1; x++) {
         const a = y * width + x;
         const b = a + 1;
         const c = a + width;
         const d = c + 1;
-        indices.push(a, c, b, b, c, d);
+        const aValid = validMask?.[y]?.[x] !== false;
+        const bValid = validMask?.[y]?.[x + 1] !== false;
+        const cValid = validMask?.[y + 1]?.[x] !== false;
+        const dValid = validMask?.[y + 1]?.[x + 1] !== false;
+        if (aValid && cValid && bValid) indices.push(a, c, b);
+        if (bValid && cValid && dValid) indices.push(b, c, d);
       }
     }
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
