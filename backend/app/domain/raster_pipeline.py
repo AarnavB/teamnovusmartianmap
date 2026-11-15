@@ -171,6 +171,7 @@ def dem_to_terrain(path: Path, *, width: int = 96, height: int = 96, vertical_un
         science_potential=None,
         obstacle=obstacle.tolist(),
         targets=[],
+        valid_mask=valid.tolist(),
         seed=0,
         available_layers={"elevation", "slope", "roughness", "coverage_mask"},
         terrain_id=f"imported-dem-{file_hash[:12]}",
