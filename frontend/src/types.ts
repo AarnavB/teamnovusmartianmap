@@ -308,6 +308,7 @@ export type JevStatus = {
   service_url: string | null;
   token_configured: boolean;
   reachable: boolean;
+  ready?: boolean;
   reachability: { configured?: boolean; reachable?: boolean; service?: string; service_configured?: boolean; service_ready?: boolean; status_code?: number; reason?: string };
   last_success: {
     available: boolean;
