@@ -1,178 +1,178 @@
-# MARSCOPE — From Orbit to Bootprint
+# MARSCOPE 0.4.0
 
-**Release:** 0.3.1
-**Type:** research / hackathon prototype
-**Mission-site profiles:** historic Mars landing areas; default profile: Jezero Crater
-**Primary rule:** never present simulated values as NASA observations.
+**From orbit to bootprint: evidence-informed Mars exploration research.**
 
-MARSCOPE combines a multi-objective traversal planner with official planetary archive discovery, provenance-aware data import, a cited science assistant, and an offline review package. The code is modular so data providers can be extended without rewriting the planner.
+MARSCOPE combines a React/Three.js mission interface, a FastAPI science and route-planning backend, and a standalone TypeScript Jev decision service. Jev can review NASA/JPL evidence and produce preference weights for the balanced route profile.
 
-> **Research prototype only.** The default terrain is a deterministic synthetic teaching grid. It is not a geographic crop of the selected mission site. The system is not certified navigation software and must not be used to guide real people or real EVA operations. The mobility, energy, oxygen and time estimates are illustrative assumptions, not validated human-performance predictions.
-
-## What is implemented
-
-### Planning and simulation
-
-- Selectable historic Mars mission-site profiles (Jezero, Gale, Gusev, Meridiani Planum, Elysium Planitia, Ares Vallis, Chryse Planitia, Utopia Planitia and Vastitas Borealis), with landing-site reference coordinates and source links. These profiles set mission context only; they do not move or georeference the planner grid.
-- Bounded Pareto-label multi-objective A* with non-negative normalized edge costs.
-- Conservative, balanced and science-first route policies.
-- User-adjustable objective multipliers, renormalized after unavailable data layers are removed.
-- Hard exclusions for obstacles, configured slope and available temperature layers; no diagonal corner-cutting.
-- Outbound and return-resource reserve checks for modeled time, energy and oxygen.
-- LPA* retained-state replanning for simulated local changes to an already available layer.
-- Standard A*, Dijkstra and distance-only baseline comparisons over the same fixture.
-- Route explanations, uncertainty, source-availability notes and `N/A` metrics when a layer is not present.
-
-### Official planetary data connections
-
-- **NASA PDS Search API:** live product discovery and product-ID resolution for PDS4 metadata.
-- **PDS Geosciences Node ODE REST:** live Mars orbital-product and footprint searches for HiRISE, CTX and CRISM.
-- **NASA/JPL Mars Trek WMTS:** official layer catalogue, GetCapabilities parsing and bounded tile caching for offline review.
-- **Official product downloader:** downloads user-selected files from an HTTPS allow-list of PDS / NASA mission archive hosts, checks redirects, enforces a 250 MB cap, and stores the original bytes with SHA-256 and a provenance sidecar.
-- **PDS3 / PDS4 label inspection:** extracts convenience metadata while preserving original label text and its hash.
-- **GeoTIFF inspection and ingestion:** Mars-ellipsoid screening, projected metre-CRS check, DEM-derived slope/roughness, NoData masking and provenance.
-- **Aligned science layers:** explicit band, meaning, units and normalization range; only layers covering the active DEM footprint can be imported.
-- **Curiosity REMS / RAD CSV import:** explicit column mapping and raw-file retention. These remain rover-station time series, never a spatial field.
-
-### Science and offline capabilities
-
-- BM25-style retrieval over a curated NASA/JPL boxwork evidence set.
-- Optional server-side OpenAI Responses API generation grounded only in the retrieved evidence. If no `OPENAI_API_KEY` is configured, MARSCOPE uses the deterministic extractive fallback. The key is never sent to the browser.
-- Offline review ZIP containing the current terrain, optional mission plan, data catalogue, evidence set, cached WMTS archives, imported observations, labels and official downloads.
-- EVA route-following simulation with cell-by-cell progress, grid-relative heading, next waypoint, remaining-route estimates, upcoming slope/uncertainty warnings, nearby geolocated targets, a reverse trace to the start, and cached-review-map status.
-- PWA shell caching for core app resources and selected read-only API responses.
-
-## What this release does not claim to do
-
-The official archives are connected for **discovery and selected file retrieval**, but the app does not ship a preloaded, georeferenced science stack for every selectable mission site. The following remain deliberate boundaries:
-
-- No automatic science interpretation of arbitrary PDS binary products. Product-specific labels, SIS documentation, calibration, SPICE/localization and projection checks remain necessary.
-- WMTS tiles can be cached for review, but are not currently draped as a georegistered basemap in the planner's terrain mesh. They are not a DEM.
-- No complete georeferenced Curiosity observation catalogue or automated rover-image localization is bundled.
-- No validated spatial Mars weather, wind, dust, surface-radiation-dose or thermal forecast model is included.
-- REMS / RAD point-time observations are imported as station records only. No spatial extrapolation is performed.
-- The science assistant has five curated evidence records, not a full PDS-wide scientific literature index. Generative answers are optional and must be checked against the linked originals.
-- There is no persistent PostGIS service. Imported files and provenance are stored locally; route sessions are in-memory and are cleared when the backend restarts.
-- The offline PWA is an app/reference cache plus a separately exported review ZIP, not a complete offline planetary navigation package. The EVA progress indicator is simulated; cached WMTS tiles are listed but are not yet loaded as the EVA basemap.
+> **Research prototype only.** The planner's default terrain is not a verified geographic surface. A route returned by this software is not certified astronaut guidance. Jev weights express preferences, not probabilities of route success or safety. Import and verify real planetary data before interpreting routes geographically.
 
 ## Repository layout
 
-```text
-MARSCOPE/
-├── backend/
-│   ├── app/
-│   │   ├── domain/          # label, raster, observations, RAG, offline package
-│   │   ├── services/        # PDS / ODE, WMTS, official downloads, optional LLM
-│   │   ├── main.py          # FastAPI endpoints and application wiring
-│   │   ├── planner.py       # bounded multi-objective A*
-│   │   ├── lpa.py           # LPA* incremental repair
-│   │   ├── benchmarks.py   # baseline algorithms
-│   │   └── terrain.py       # explicit synthetic fixture / terrain container
-│   ├── data/evidence/       # versioned curated NASA/JPL evidence records
-│   ├── tests/               # planner, API, archive, raster and ingestion tests
-│   ├── scripts/             # planetary GeoTIFF preparation helper
-│   └── requirements*.txt
-├── frontend/
-│   ├── src/components/      # Three.js terrain, science assistant, data explorer
-│   ├── public/              # PWA manifest and service worker
-│   └── vite.config.ts       # local /api proxy
-├── docs/                    # science, data, algorithm, architecture, validation
-├── scripts/dev.sh
-└── .env.example
-```
+- \`frontend/\`: React + Vite interface.
+- \`backend/\`: FastAPI, terrain, route planning, NASA/PDS data and Jev proxy endpoints.
+- \`decision-service/\`: Node/TypeScript Jev service. It supports TypeSafe and OpenCode providers.
+- \`docs/JEV-INTEGRATION.md\`: Jev architecture, security boundaries, deployment and verification.
 
-## Run locally
+The release notes retained under \`MARSCOPE_0.4.0/\` are documentation only. **Run all commands from the repository root or the indicated source directory; do not run them from the \`MARSCOPE_0.4.0/\` folder.**
 
-Requirements: Python 3.10+ (tested with Python 3.13) and Node.js 20+.
+## Local development
 
-### 1. Backend
+Requirements: Python 3.11+, Node.js 22.15+, and internet access for the first dependency install.
 
-```bash
-cd MARSCOPE/backend
+Start the three services in three separate terminals.
+
+### 1. Jev decision service
+
+From the repository root:
+
+\`\`\`bash
+cd decision-service
+npm ci
+npm run build
+\`\`\`
+
+Set a private service token and start the service.
+
+PowerShell:
+
+\`\`\`powershell
+$env:PORT = "8100"
+$env:MARSCOPE_JEV_SERVICE_TOKEN = "<same-random-token-used-by-backend>"
+npm start
+\`\`\`
+
+macOS/Linux:
+
+\`\`\`bash
+export PORT=8100
+export MARSCOPE_JEV_SERVICE_TOKEN="<same-random-token-used-by-backend>"
+npm start
+\`\`\`
+
+### 2. Python API
+
+In a second terminal, from the repository root:
+
+\`\`\`bash
+cd backend
 python -m venv .venv
-# Windows PowerShell: .venv\Scripts\Activate.ps1
-# macOS / Linux:
-source .venv/bin/activate
-pip install -r requirements.txt
-# Optional, required only for GeoTIFF ingestion / inspection:
-pip install -r requirements-geospatial.txt
-uvicorn app.main:app --reload --port 8000
-```
+\`\`\`
 
-API reference: <http://localhost:8000/docs>
-Health check: <http://localhost:8000/api/health>
+Activate the environment:
 
-### 2. Frontend (second terminal)
+PowerShell: \`.venv\\Scripts\\Activate.ps1\`
 
-```bash
-cd MARSCOPE/frontend
-npm install
+macOS/Linux: \`source .venv/bin/activate\`
+
+Then install and start:
+
+\`\`\`bash
+python -m pip install -r requirements.txt
+\`\`\`
+
+PowerShell:
+
+\`\`\`powershell
+$env:JEV_SERVICE_URL = "http://127.0.0.1:8100"
+$env:MARSCOPE_JEV_SERVICE_TOKEN = "<same-random-token-used-by-jev-service>"
+python -m uvicorn app.main:app --reload --port 8000
+\`\`\`
+
+macOS/Linux:
+
+\`\`\`bash
+export JEV_SERVICE_URL="http://127.0.0.1:8100"
+export MARSCOPE_JEV_SERVICE_TOKEN="<same-random-token-used-by-jev-service>"
+python -m uvicorn app.main:app --reload --port 8000
+\`\`\`
+
+The token must match exactly in both terminals. Generate a fresh random value for your own machine; never commit it or paste it into frontend variables.
+
+### 3. Frontend
+
+In a third terminal, from the repository root:
+
+\`\`\`bash
+cd frontend
+npm ci
 npm run dev
-```
+\`\`\`
 
-Open <http://localhost:5173>. Vite proxies `/api` to `http://127.0.0.1:8000` by default. For a separately hosted API, create `frontend/.env.local` with:
+Open <http://localhost:5173>. During local development the frontend calls the API at <http://localhost:8000>.
 
-```dotenv
-VITE_API_BASE=https://your-api.example.org
-```
+## Configure Jev in the app
 
-Do not put server-side API keys in any `VITE_*` variable.
+Open **JEV INTEL**, choose **TypeSafe** or **OpenCode Console**, and enter the matching provider API key. The provider key is held in page memory and sent to the local Node service for the request; it is not a build-time \`VITE_*\` variable. Refreshing the page clears it.
 
-### 3. Optional generative science answers
+The internal service token and the provider API key are different secrets:
 
-The extractive cited assistant works without an API key. To enable optional generation, set these variables in the **backend process environment** (or a backend-only `.env` loaded by your deployment):
+- \`MARSCOPE_JEV_SERVICE_TOKEN\`: shared only between the Python API and the Node decision service.
+- TypeSafe or OpenCode API key: supplied by the user in the JEV INTEL panel.
 
-```dotenv
-OPENAI_API_KEY=your_server_side_key
-MARSCOPE_LLM_MODEL=gpt-6-astra
-```
+The evidence assessment and adaptive pathfinding endpoints are:
 
-The backend calls the OpenAI Responses API with `store: false`, no web tools and only the retrieved NASA/JPL evidence records. Answers always return the corresponding source records separately. If the API is unconfigured or unavailable, MARSCOPE falls back to extractive summaries. Never commit real keys.
+- \`POST /api/jev/evidence-assessment\`
+- \`POST /api/jev/pathfinding-weights\`
 
-### 4. Tests
+Diagnostics:
 
-```bash
-cd MARSCOPE/backend
-pip install pytest
+- Frontend: <http://localhost:5173>
+- FastAPI health: <http://localhost:8000/api/health>
+- Jev service health: <http://localhost:8100/health>
+- FastAPI interactive docs: <http://localhost:8000/docs>
+
+If Jev is unavailable or returns an invalid decision, the app must not apply stale or fabricated weights. The ordinary planner remains available with its static route profiles.
+
+## Deployment
+
+The root \`render.yaml\` defines two Render web services:
+
+1. \`marswalk-api\`: Python/FastAPI.
+2. \`marscope-jev\`: Node decision service.
+
+The blueprint creates a shared \`marscope-jev-secrets\` environment-variable group with a generated \`MARSCOPE_JEV_SERVICE_TOKEN\`. Both services must receive that same value. The backend's \`JEV_SERVICE_URL\` must point to the actual public URL of the Node service; update it if Render assigns a different hostname.
+
+For a separately hosted production frontend, set \`VITE_API_BASE\` to the public URL of \`marswalk-api\` at build time and configure the backend's \`CORS_ORIGINS\` to include the frontend origin. Never expose either server-side token as a \`VITE_*\` variable.
+
+See [Jev integration notes](docs/JEV-INTEGRATION.md) for the request flow, local token setup and deployment details.
+
+## Tests
+
+Run each suite from its project directory.
+
+Backend:
+
+\`\`\`bash
+cd backend
+python -m pip install pytest
 python -m pytest -q
-```
+\`\`\`
 
-### One-command development helper
+Jev decision service:
 
-From the repository root, `bash scripts/dev.sh` creates the backend virtual environment if needed, installs dependencies, and starts both servers. Logs go to `.run-logs/`.
+\`\`\`bash
+cd decision-service
+npm ci
+npm run build
+npm test
+\`\`\`
 
-## Working with official NASA data
+Frontend:
 
-1. Open **Data → NASA data access**.
-2. Search the NASA PDS registry or ODE footprint catalogue. Results are discovery metadata, not a substitute for product files and labels.
-3. Inspect and preserve the original PDS3 `.LBL` or PDS4 `.XML` label. Confirm the target body, instrument, observation time, product level, units, coordinate convention, map projection, vertical datum and pixel scale.
-4. Download only a product whose official archive URL and footprint match the study region. The downloader accepts supported file extensions on an allow-list of official archive hosts and caps downloads at 250 MB.
-5. Do not assume a PDS image is a DEM. For a DEM import, prepare a georeferenced GeoTIFF using a Mars reference figure, projected metre units and documented vertical metres. Confirm the metre units in the product label in the UI before import.
-6. Import an auxiliary raster only after confirming it is the right measurement. The user must explicitly map the band and its units/range; a CRISM radiance band is not automatically a mineral-probability score.
-7. Import REMS / RAD tabular data using an explicit source-column mapping. Preserve it as rover-station/time observations.
+\`\`\`bash
+cd frontend
+npm ci
+npm run build
+\`\`\`
 
-See `docs/SCIENCE_AND_DATA.md` for the official source inventory, access methods, limitations and coordinate handling. See `docs/ALGORITHM.md` for the objective model and `docs/VALIDATION.md` for the validation boundary.
+The unit tests verify local code and policy behaviour. A real provider call still requires a valid provider key and provider-side model access.
 
-## Reproducible demo sequence
+## Scientific and engineering boundaries
 
-1. Open the 3D surface view and read the synthetic / not-georeferenced marker.
-2. Toggle the available synthetic layers and inspect source status.
-3. Select start and destination grid cells.
-4. Generate conservative, balanced and science-first alternatives.
-5. Compare route length, modeled time/energy, risk, science utility and uncertainty.
-6. Run the A* / Dijkstra / distance-only comparison.
-7. Inject a simulated obstacle or modify an available local field and inspect the LPA* repair.
-8. Open the science assistant and check the NASA/JPL evidence cards.
-9. Discover a PDS/ODE product, inspect its label, or cache a small Mars Trek WMTS area.
-10. Export an offline review ZIP.
+- NASA/PDS and orbital archive results are discovery metadata until the original product label and documentation are checked.
+- A rover panorama or map tile is imagery, not a DEM or an astronaut-scale hazard map.
+- Imported elevation and science layers require verified footprints, coordinate systems, units and provenance.
+- Jev's scores and probabilities are not calibrated scientific posteriors.
+- The planner's terrain, mobility and resource assumptions are research estimates, not validated operational models.
 
-## Known engineering limits
-
-- Bounded Pareto A* retains at most seven labels per node, so it is a bounded approximate frontier search, not an exhaustive Pareto-optimal solver.
-- The LPA* repair is for the fixed-start/fixed-goal balanced scalarization. It does not solve the full resource-constrained multiobjective dynamic replanning problem.
-- Weight multipliers are adjustable demonstration preferences, not calibrated mission policy.
-- The imported DEM's terrain cost products are only as valid as its source product, map geometry, vertical datum, pixel scale and resampling. The ellipsoid check is a screening guard, not proof of product identity.
-- Roughness is currently a 3×3 local standard deviation of the DEM. It is not a validated rock-size or human-footing classifier.
-- The current generative assistant is optional and bounded to the retrieved source subset. It is not an autonomous science discovery system.
-
-Never describe a route as astronaut-safe because this prototype returns it. Human EVA use would require validated surface data, validated mobility/resource models, human-factors review, mission-authorized limits, uncertainty budgets and formal verification.
+See [algorithm notes](docs/ALGORITHM.md), [science and data notes](docs/SCIENCE_AND_DATA.md), and [validation boundaries](docs/VALIDATION.md).
