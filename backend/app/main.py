@@ -7,6 +7,7 @@ import threading
 import logging
 import time
 import uuid
+from datetime import datetime, timezone
 from time import perf_counter
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ from fastapi.responses import FileResponse
 
 from .benchmarks import scalar_baseline, benchmark_label_caps
 from .lpa import LPAStar
-from .models import BenchmarkRequest, ConditionUpdateRequest, PlanRequest, ReplanRequest, SensitivityRequest, WaypointPlanRequest
+from .models import BenchmarkRequest, ConditionUpdateRequest, MissionEventRequest, PlanRequest, ReplanRequest, SensitivityRequest, WaypointPlanRequest
 from .planner import MissionConstraints, MultiObjectiveAStar, build_route_set, route_metrics
 from .registry import get_registry
 from .terrain import Terrain
@@ -159,6 +160,52 @@ class _SessionStore:
 
 
 PLAN_SESSIONS = _SessionStore()
+
+
+def _safe_event_data(value: Any, depth: int = 0) -> Any:
+    """Remove credential-like fields before an event can enter the replay log."""
+    if depth > 8:
+        return "[depth-limited]"
+    if isinstance(value, dict):
+        safe: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized = str(key).lower().replace("-", "_")
+            if any(token in normalized for token in ("api_key", "apikey", "secret", "password", "authorization", "access_token")):
+                continue
+            safe[str(key)[:80]] = _safe_event_data(item, depth + 1)
+        return safe
+    if isinstance(value, (list, tuple)):
+        return [_safe_event_data(item, depth + 1) for item in list(value)[:2000]]
+    if isinstance(value, str):
+        return value[:4000]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)[:500]
+
+
+def _append_mission_event(
+    session: dict[str, Any],
+    event_type: str,
+    title: str,
+    summary: str,
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    events = session.setdefault("events", [])
+    event = {
+        "id": str(uuid.uuid4()),
+        "sequence": len(events) + 1,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "type": event_type,
+        "title": title[:120],
+        "summary": summary[:500],
+        "data": _safe_event_data(data or {}),
+    }
+    # The event log is bounded with the same in-memory mission session that
+    # owns the terrain/planner state. Secrets are filtered before storage.
+    events.append(event)
+    if len(events) > 500:
+        del events[:-500]
+    return event
 
 
 def _terrain_for_site(site_id: str) -> Terrain:
@@ -384,10 +431,29 @@ def routes(payload: PlanRequest) -> dict[str, Any]:
         "obstacles_added": [],
         "condition_updates": [],
         "routes": route_set,
+        "events": [],
+        "selected_route_id": "B" if any(route.get("id") == "B" for route in route_set) else route_set[0]["id"],
         "terrain_id": active_terrain.terrain_id,
         "site_id": payload.site_id,
-        "created_utc": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "created_utc": datetime.now(timezone.utc).isoformat(),
     })
+    _append_mission_event(
+        PLAN_SESSIONS.get(plan_id),
+        "PLAN_CREATED",
+        "Initial route plan created",
+        f"Generated {len(route_set)} feasible route alternative(s) on {active_terrain.site_name}.",
+        {
+            "site_id": payload.site_id,
+            "terrain_id": active_terrain.terrain_id,
+            "start": {"x": start[0], "y": start[1]},
+            "goal": {"x": goal[0], "y": goal[1]},
+            "constraints": constraints.__dict__,
+            "routes": [
+                {"id": route["id"], "name": route["name"], "profile": route["profile"], "path": route["path"], "metrics": route["metrics"]}
+                for route in route_set
+            ],
+        },
+    )
     return {
         "plan_id": plan_id,
         "terrain_id": active_terrain.terrain_id,
@@ -402,12 +468,40 @@ def routes(payload: PlanRequest) -> dict[str, Any]:
     }
 
 
+@app.get("/api/missions/{plan_id}/events")
+def get_mission_events(plan_id: str) -> dict[str, Any]:
+    session = PLAN_SESSIONS.get(plan_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Mission session not found or expired.")
+    return {"plan_id": plan_id, "events": list(session.get("events", []))}
+
+
+@app.post("/api/missions/{plan_id}/events")
+def record_mission_event(plan_id: str, payload: MissionEventRequest) -> dict[str, Any]:
+    session = PLAN_SESSIONS.get(plan_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Mission session not found or expired.")
+    allowed_types = {"JEV_DECISION", "ROUTE_SELECTED", "REPLAY_NOTE"}
+    if payload.event_type not in allowed_types:
+        raise HTTPException(status_code=422, detail=f"Event type must be one of: {', '.join(sorted(allowed_types))}.")
+    if payload.event_type == "ROUTE_SELECTED":
+        route_id = payload.data.get("route_id")
+        if not isinstance(route_id, str) or not any(route.get("id") == route_id for route in session.get("routes", [])):
+            raise HTTPException(status_code=422, detail="Selected route is not part of this mission.")
+        session["selected_route_id"] = route_id
+    event = _append_mission_event(session, payload.event_type, payload.title, payload.summary, payload.data)
+    return {"plan_id": plan_id, "event": event, "events": list(session.get("events", []))}
+
+
 @app.post("/api/replan")
 def replan(payload: ReplanRequest) -> dict[str, Any]:
     session = PLAN_SESSIONS.get(payload.plan_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Plan session not found. Generate a new route set first.")
     terrain: Terrain = session["terrain"]
+    balanced_before = next((route for route in session.get("routes", []) if route.get("id") == "B"), None)
+    path_before = copy.deepcopy(balanced_before.get("path", [])) if balanced_before else []
+    metrics_before = copy.deepcopy(balanced_before.get("metrics", {})) if balanced_before else {}
     x, y = payload.obstacle.x, payload.obstacle.y
     if not terrain.in_bounds(x, y):
         raise HTTPException(status_code=422, detail="Obstacle cell is outside the terrain grid")
@@ -436,6 +530,27 @@ def replan(payload: ReplanRequest) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     session["obstacles_added"].append({"x": x, "y": y})
+    path_after = [{"x": px, "y": py} for px, py in path]
+    for route in session.get("routes", []):
+        if route.get("id") == "B":
+            route["path"] = path_after
+            route["metrics"] = metrics
+    event = _append_mission_event(
+        session,
+        "REPLAN_COMPLETED",
+        "Route replanned around a simulated obstacle",
+        "LPA* repaired the balanced route after a user-injected obstacle scenario.",
+        {
+            "route_id": "B",
+            "obstacle": {"x": x, "y": y},
+            "path_before": path_before,
+            "path_after": path_after,
+            "metrics_before": metrics_before,
+            "metrics_after": metrics,
+            "algorithm": "LPA* incremental repair",
+            "expanded_during_repair": planner.expanded - before_expanded,
+        },
+    )
     return {
         "plan_id": payload.plan_id,
         "path": [{"x": px, "y": py} for px, py in path],
@@ -653,10 +768,26 @@ def waypoint_plan(payload: WaypointPlanRequest) -> dict[str, Any]:
             "metrics": combined_metrics,
             "is_pareto": True,
         }],
+        "events": [],
+        "selected_route_id": "W",
         "terrain_id": active_terrain.terrain_id,
         "site_id": payload.site_id,
-        "created_utc": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "created_utc": datetime.now(timezone.utc).isoformat(),
     })
+    _append_mission_event(
+        PLAN_SESSIONS.get(plan_id),
+        "PLAN_CREATED",
+        "Initial waypoint mission created",
+        f"Generated a contiguous mission route with {len(wp_pts)} intermediate target(s).",
+        {
+            "site_id": payload.site_id,
+            "terrain_id": active_terrain.terrain_id,
+            "start": {"x": start_pt[0], "y": start_pt[1]},
+            "goal": {"x": goal_pt[0], "y": goal_pt[1]},
+            "waypoints": [{"x": x, "y": y} for x, y in wp_pts],
+            "routes": [{"id": "W", "name": f"Waypoint mission ({len(wp_pts)} waypoints)", "profile": "waypoint_mission", "path": full_path, "metrics": combined_metrics}],
+        },
+    )
 
     return {
         "plan_id": plan_id,
@@ -690,6 +821,19 @@ def route_report(plan_id: str) -> dict[str, Any]:
     site_id = session.get("site_id", terrain.site_id)
     site = MISSION_SITES.get(site_id, {})
     routes = session.get("routes", [])
+    events = list(session.get("events", []))
+    selected_route_id = session.get("selected_route_id") or (routes[0].get("id") if routes else None)
+    selected_route = next((route for route in routes if route.get("id") == selected_route_id), routes[0] if routes else None)
+    replanning_count = sum(1 for event in events if event.get("type") == "REPLAN_COMPLETED")
+    mission_summary = {
+        "event_count": len(events),
+        "replanning_count": replanning_count,
+        "selected_route_id": selected_route_id,
+        "final_distance_m": selected_route.get("metrics", {}).get("distance_m") if selected_route else None,
+        "final_duration_min": selected_route.get("metrics", {}).get("duration_min") if selected_route else None,
+        "return_feasible": selected_route.get("metrics", {}).get("return_feasible") if selected_route else None,
+        "status": "REPLANNED" if replanning_count else "PLANNED",
+    }
     constraints = session.get("constraints")
     start = session.get("start")
     goal = session.get("goal")
@@ -748,7 +892,19 @@ def route_report(plan_id: str) -> dict[str, Any]:
         ])
 
     lines.extend([
-        "## 4. Scientific Integrity & Disclaimers",
+        "## 4. Mission Replay Timeline",
+        f"- **Recorded events:** {len(events)}",
+        f"- **Replanning operations:** {replanning_count}",
+        f"- **Final selected route:** {selected_route_id or 'N/A'}",
+        f"- **Mission status:** {mission_summary['status']}",
+        "",
+    ])
+    for event in events:
+        lines.append(f"- **#{event.get('sequence')} {event.get('title')}** — {event.get('timestamp_utc')}")
+        lines.append(f"  {event.get('summary')}")
+    lines.extend([
+        "",
+        "## 5. Scientific Integrity & Disclaimers",
         "- **Research Prototype:** MARSCOPE is an exploratory research demonstrator for traversal planning concepts.",
         "- **Not Certified Flight Software:** These paths and resource estimates are research models and MUST NOT be used for operational crewed EVA guidance.",
         "- **Unvalidated Mobility Models:** Energy consumption, metabolic rates, and transit durations are research equations. Atmospheric and radiation layers remain unavailable unless separately imported with verified spatial coordinates.",
@@ -770,6 +926,8 @@ def route_report(plan_id: str) -> dict[str, Any]:
         "constraints": constraints.__dict__,
         "geometry": {"start": start, "goal": goal},
         "routes": routes,
+        "mission_summary": mission_summary,
+        "events": events,
         "disclaimer": "Research prototype only. Never use for operational human mission guidance.",
     }
 
@@ -1149,6 +1307,9 @@ def replan_condition(payload: ConditionUpdateRequest) -> dict[str, Any]:
         planner = _get_session_planner(session)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Incremental planner could not initialize: {exc}") from exc
+    balanced_before = next((route for route in session.get("routes", []) if route.get("id") == "B"), None)
+    path_before = copy.deepcopy(balanced_before.get("path", [])) if balanced_before else []
+    metrics_before = copy.deepcopy(balanced_before.get("metrics", {})) if balanced_before else {}
     array = getattr(terrain, payload.kind)
     if array is None:
         raise HTTPException(status_code=409, detail=f"Spatial layer {payload.kind} is not loaded from source data.")
@@ -1171,10 +1332,27 @@ def replan_condition(payload: ConditionUpdateRequest) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     update = {"cell": {"x": x, "y": y}, "kind": payload.kind, "previous_value": old_value, "new_value": payload.value, "source": "USER_ENTERED_SCENARIO_UPDATE"}
     session["condition_updates"].append(update)
+    path_after = [{"x": px, "y": py} for px, py in path]
     session["routes"] = [
-        ({**route, "path": [{"x": px, "y": py} for px, py in path], "metrics": metrics} if route["profile"] == "balanced" else route)
+        ({**route, "path": path_after, "metrics": metrics} if route["profile"] == "balanced" else route)
         for route in session["routes"]
     ]
+    _append_mission_event(
+        session,
+        "REPLAN_COMPLETED",
+        "Route replanned after a terrain-layer scenario update",
+        f"LPA* repaired the balanced route after a simulated {payload.kind} update.",
+        {
+            "route_id": "B",
+            "change": update,
+            "path_before": path_before,
+            "path_after": path_after,
+            "metrics_before": metrics_before,
+            "metrics_after": metrics,
+            "algorithm": "LPA* incremental repair",
+            "expanded_during_repair": planner.expanded - before_expanded,
+        },
+    )
     return {
         "plan_id": payload.plan_id,
         "path": [{"x": px, "y": py} for px, py in path],
