@@ -31,3 +31,20 @@ class ConditionUpdateRequest(BaseModel):
     cell: Point
     kind: str
     value: float
+
+
+class SensitivityRequest(BaseModel):
+    site_id: str = "jezero"
+    start: Point
+    goal: Point
+    parameter: str = "max_slope_deg"
+    values: list[float] = Field(default_factory=lambda: [14.0, 18.0, 22.0, 26.0, 30.0])
+    constraints: dict = Field(default_factory=dict)
+
+
+class WaypointPlanRequest(BaseModel):
+    site_id: str = "jezero"
+    start: Point
+    waypoints: list[Point] = Field(default_factory=list)
+    goal: Point
+    constraints: dict = Field(default_factory=dict)

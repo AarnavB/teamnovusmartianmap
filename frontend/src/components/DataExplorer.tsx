@@ -28,7 +28,21 @@ function siteBounds(site: MissionSite): string {
   ].map((value) => value.toFixed(4)).join(',');
 }
 
-export default function DataExplorer({ sources, planId, onTerrainImported, missionSite }: { sources: OfficialSource[]; planId?: string; onTerrainImported: (terrain: TerrainData) => void; missionSite: MissionSite }) {
+export default function DataExplorer({
+  sources,
+  planId,
+  onTerrainImported,
+  missionSite,
+  terrainLoaded,
+  terrain,
+}: {
+  sources: OfficialSource[];
+  planId?: string;
+  onTerrainImported: (terrain: TerrainData) => void;
+  missionSite: MissionSite;
+  terrainLoaded: boolean;
+  terrain?: TerrainData | null;
+}) {
   const [keywords, setKeywords] = useState(() => `${missionSite.mission} ${missionSite.region} Mars`);
   const [instrument, setInstrument] = useState('HiRISE');
   const [pdsResult, setPdsResult] = useState<ArchiveResult | null>(null);
@@ -177,7 +191,7 @@ export default function DataExplorer({ sources, planId, onTerrainImported, missi
   const makeOfflinePackage = async () => {
     setLoading('package'); setError(''); setNotice('');
     try {
-      const blob = await api.offlinePackage(planId);
+      const blob = await api.offlinePackage(planId, missionSite.id);
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = objectUrl; link.download = 'marscope-offline-review-package.zip';
@@ -188,6 +202,59 @@ export default function DataExplorer({ sources, planId, onTerrainImported, missi
   };
 
   return <div className="data-content archive-explorer">
+    <section className="archive-search-card mission-dem-card">
+      <div className="archive-section-head">
+        <b>DEM GEOSPATIAL PROVENANCE</b>
+        <span className="connected-tag">{terrainLoaded ? "REAL DEM VERIFIED" : "LOADING OFFICIAL DEM"}</span>
+      </div>
+      <h3>{missionSite.region} ({missionSite.mission})</h3>
+      <p><b>{missionSite.dem.product}</b></p>
+      <p>{missionSite.dem.source} · Source resolution: {missionSite.dem.resolutionM.toFixed(missionSite.dem.resolutionM < 2 ? 2 : 1)} m/px · {missionSite.dem.format}</p>
+      <p>{missionSite.dem.coverageNote}</p>
+
+      {terrain && (
+        <div className="provenance-detail-grid">
+          <div className="provenance-item">
+            <span>REFERENCE COORDINATES</span>
+            <strong>{missionSite.latitude.toFixed(5)}° N · {missionSite.longitudeEast.toFixed(5)}° E</strong>
+            <small>Planetocentric latitude, east-positive longitude</small>
+          </div>
+          <div className="provenance-item">
+            <span>COORDINATE SYSTEM (CRS)</span>
+            <strong>{String(terrain.coordinate_info?.crs ?? 'Mars 2000 Equirectangular')}</strong>
+            <small>Ellipsoid: IAU 2000 Mars sphere / triaxial</small>
+          </div>
+          <div className="provenance-item">
+            <span>ANALYSIS GRID GEOMETRY</span>
+            <strong>{terrain.width} × {terrain.height} cells · {terrain.cell_size_m.toFixed(1)} m/cell</strong>
+            <small>Local metric window: 2,400 m × 2,400 m</small>
+          </div>
+          <div className="provenance-item">
+            <span>SITE COVERAGE VERIFICATION</span>
+            <strong className={terrain.coordinate_info?.site_coverage_verified ? 'good' : 'bad'}>
+              {terrain.coordinate_info?.site_coverage_verified ? 'VERIFIED MATCH' : 'UNVERIFIED'}
+            </strong>
+            <small>Landing point within DEM footprint bounds</small>
+          </div>
+          <div className="provenance-item">
+            <span>SPATIAL DATA INTEGRITY</span>
+            <strong>Elevation, Slope, Roughness</strong>
+            <small>Directly sampled or derived from official raster</small>
+          </div>
+          <div className="provenance-item">
+            <span>UNAVAILABLE SCIENCE LAYERS</span>
+            <strong className="muted-text">Atmosphere, Radiation, Science, Regolith</strong>
+            <small>No synthetic interpolation. Real georeferenced data required.</small>
+          </div>
+        </div>
+      )}
+
+      <div className="archive-search-line">
+        <a href={missionSite.dem.downloadUrl} target="_blank" rel="noreferrer">OFFICIAL SOURCE FILE ↗</a>
+        <a href={missionSite.dem.documentationUrl} target="_blank" rel="noreferrer">PRODUCT DOCUMENTATION ↗</a>
+      </div>
+      <small>When this site is selected, the backend automatically retrieves this catalogued product if it is not already cached, validates its Mars CRS, metre units and site footprint, then prepares the route grid. No synthetic terrain is substituted.</small>
+    </section>
     <div className="panel-title"><span className="eyebrow">OFFICIAL ARCHIVE CONNECTORS</span><h3>NASA data access</h3><p>Discover official products, inspect their original metadata, import geospatial rasters with provenance, and preserve selected mission materials for offline review.</p></div>
 
     <section className="archive-search-card">
@@ -239,15 +306,15 @@ export default function DataExplorer({ sources, planId, onTerrainImported, missi
     </section>
 
     <section className="archive-search-card">
-      <div className="archive-section-head"><b>06 / IMPORT A VERIFIED MARS DEM</b><span className="manual-tag">GEOSPATIAL INGESTION</span></div>
-      <p>Upload a map-projected GeoTIFF with metre units and a Mars-sized reference ellipsoid. Confirm vertical units from the original PDS label before import. The pipeline derives slope and local roughness, masks NoData, and retains a source hash and CRS.</p>
+      <div className="archive-section-head"><b>06 / MANUAL DEM IMPORT (OPTIONAL FALLBACK)</b><span className="manual-tag">ADMIN / RECOVERY</span></div>
+      <p>Automatic source retrieval is the normal path. Use manual import only as an administrative fallback when the official source endpoint is unavailable or a verified local copy is being supplied. The backend applies the same Mars CRS, metre-unit and site-footprint checks. Slope and roughness are derived from measured elevations only; unavailable science and hazard rasters remain unavailable.</p>
       <label className="compact-field-label">DEM VERTICAL UNITS (VERIFY IN ORIGINAL PRODUCT LABEL)
         <select className="mapping-input" value={demVerticalUnits} onChange={(e) => setDemVerticalUnits(e.target.value)} aria-label="DEM vertical units">
           <option value="unspecified">Not verified yet</option><option value="m">Metres (verified in source label)</option>
         </select>
       </label>
-      <label className="upload-button">{loading === 'dem' ? 'PROCESSING DEM…' : 'SELECT DEM GEOTIFF'}<input type="file" accept=".tif,.tiff,image/tiff" hidden onChange={(e) => void importDem(e.target.files?.[0])} disabled={loading !== null}/></label>
-      <small>Earth UTM rasters and unknown-body coordinate systems are rejected. A PNG/JPEG/CTX image is not an elevation model. Importing in metres requires explicit confirmation above.</small>
+      <label className="upload-button">{loading === 'dem' ? 'PROCESSING DEM…' : 'SELECT VERIFIED DEM FALLBACK'}<input type="file" accept={missionSite.dem.accept} hidden onChange={(e) => void importDem(e.target.files?.[0])} disabled={loading !== null}/></label>
+      <small>Do not upload a browse PNG/JPEG/CTX image; the selected source must be an elevation model. Confirm metres from the source product label. Meridiani uses a PDS3 IMG file; ingestion requires the embedded planetary label/CRS to be readable by GDAL/Rasterio. If it is rejected, convert it with a planetary-aware tool while preserving its PDS metadata.</small>
     </section>
 
     <section className="archive-search-card">

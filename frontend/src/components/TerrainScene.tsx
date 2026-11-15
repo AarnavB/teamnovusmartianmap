@@ -15,10 +15,15 @@ type Props = {
   obstacles: Point[];
   layer: Layer;
   viewMode: '3D' | '2D';
-  pickMode: 'start' | 'goal' | null;
+  pickMode: 'start' | 'goal' | 'waypoint' | null;
   evaPosition: Point | null;
   returnPath: Point[];
   onPick: (point: Point) => void;
+  hazardOverlay?: boolean;
+  maxSlopeDeg?: number;
+  waypoints?: Point[];
+  previewRoute?: { path: Point[]; label: string } | null;
+  deviationPoint?: Point | null;
 };
 
 type Latest = Omit<Props, 'terrain'>;
@@ -26,15 +31,18 @@ type Latest = Omit<Props, 'terrain'>;
 function layerValue(terrain: TerrainData, layer: Layer, x: number, y: number): number {
   if (layer === 'slope') return Math.min(terrain.slope_deg[y][x] / 32, 1);
   if (layer === 'roughness') return terrain.roughness[y][x];
-  if (layer === 'regolith') return terrain.regolith[y][x];
-  if (layer === 'temperature') return Math.max(0, Math.min(1, (terrain.temperature_c[y][x] + 150) / 200));
-  if (layer === 'environment') return terrain.environment_index[y][x];
-  if (layer === 'radiation') return terrain.radiation_index[y][x];
-  if (layer === 'uncertainty') return terrain.uncertainty[y][x];
-  if (layer === 'science') return terrain.science_potential[y][x];
+  if (layer === 'regolith') return terrain.regolith?.[y]?.[x] ?? 0;
+  if (layer === 'temperature') {
+    const value = terrain.temperature_c?.[y]?.[x];
+    return typeof value === 'number' ? Math.max(0, Math.min(1, (value + 150) / 200)) : 0;
+  }
+  if (layer === 'environment') return terrain.environment_index?.[y]?.[x] ?? 0;
+  if (layer === 'radiation') return terrain.radiation_index?.[y]?.[x] ?? 0;
+  if (layer === 'uncertainty') return terrain.uncertainty?.[y]?.[x] ?? 0;
+  if (layer === 'science') return terrain.science_potential?.[y]?.[x] ?? 0;
   const values = terrain.elevation_m.flat();
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const min = values.reduce((a, b) => Math.min(a, b));
+  const max = values.reduce((a, b) => Math.max(a, b));
   return (terrain.elevation_m[y][x] - min) / Math.max(0.001, max - min);
 }
 
@@ -107,7 +115,7 @@ export default function TerrainScene(props: Props) {
     const colors: number[] = [];
     const indices: number[] = [];
     const values = props.terrain.elevation_m.flat();
-    const min = Math.min(...values);
+    const min = values.reduce((a, b) => Math.min(a, b));
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const z = ((props.terrain.elevation_m[y][x] - min) / Math.max(props.terrain.cell_size_m, 1e-6)) * VERTICAL_EXAGGERATION;
@@ -117,13 +125,19 @@ export default function TerrainScene(props: Props) {
         colors.push(color.r, color.g, color.b);
       }
     }
+    const validMask = props.terrain.valid_mask;
     for (let y = 0; y < height - 1; y++) {
       for (let x = 0; x < width - 1; x++) {
         const a = y * width + x;
         const b = a + 1;
         const c = a + width;
         const d = c + 1;
-        indices.push(a, c, b, b, c, d);
+        const aValid = validMask?.[y]?.[x] !== false;
+        const bValid = validMask?.[y]?.[x + 1] !== false;
+        const cValid = validMask?.[y + 1]?.[x] !== false;
+        const dValid = validMask?.[y + 1]?.[x + 1] !== false;
+        if (aValid && cValid && bValid) indices.push(a, c, b);
+        if (bValid && cValid && dValid) indices.push(b, c, d);
       }
     }
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -211,15 +225,35 @@ export default function TerrainScene(props: Props) {
     const mesh = meshRef.current;
     if (!mesh) return;
     const colors = mesh.geometry.getAttribute('color') as THREE.BufferAttribute;
+    const limit = props.maxSlopeDeg ?? 22;
+
     for (let y = 0; y < props.terrain.height; y++) {
       for (let x = 0; x < props.terrain.width; x++) {
-        const color = makeColor(layerValue(props.terrain, props.layer, x, y), props.layer);
+        let color: THREE.Color;
+        if (props.hazardOverlay) {
+          const isBlocked = props.terrain.obstacle[y][x] || props.terrain.valid_mask?.[y]?.[x] === false;
+          const slope = props.terrain.slope_deg[y][x];
+          if (isBlocked) {
+            color = new THREE.Color('#191f21');
+          } else if (slope > limit) {
+            color = new THREE.Color('#d85e45'); // hazard steep slope
+          } else if (slope >= limit * 0.8) {
+            color = new THREE.Color('#d8a35c'); // warning caution slope
+          } else {
+            color = new THREE.Color('#2e4a42'); // safe traversable slope
+          }
+        } else {
+          color = makeColor(layerValue(props.terrain, props.layer, x, y), props.layer);
+        }
         colors.setXYZ(y * props.terrain.width + x, color.r, color.g, color.b);
       }
     }
     colors.needsUpdate = true;
-    mesh.geometry.computeVertexNormals();
-  }, [props.terrain, props.layer]);
+    // computeVertexNormals() is intentionally NOT called here.
+    // Normals depend only on vertex positions (geometry), not on vertex colours.
+    // Positions are set once at terrain load; calling this on every layer change
+    // wastes ~1 ms per frame and produces no visible difference.
+  }, [props.terrain, props.layer, props.hazardOverlay, props.maxSlopeDeg]);
 
   useEffect(() => {
     const overlay = overlayRef.current;
@@ -235,7 +269,7 @@ export default function TerrainScene(props: Props) {
     }
     const { width, height } = props.terrain;
     const values = props.terrain.elevation_m.flat();
-    const min = Math.min(...values);
+    const min = values.reduce((a, b) => Math.min(a, b));
     const zAt = (p: Point) => ((props.terrain.elevation_m[p.y][p.x] - min) / Math.max(props.terrain.cell_size_m, 1e-6)) * VERTICAL_EXAGGERATION + 1.2;
     const world = (p: Point) => new THREE.Vector3(p.x - width / 2, p.y - height / 2, zAt(p));
 
@@ -275,6 +309,35 @@ export default function TerrainScene(props: Props) {
     for (const obstacle of props.obstacles) addSphere(obstacle, '#e25f4e', 1.05, 2.6);
     if (props.evaPosition) addSphere(props.evaPosition, '#70e0c0', 1.45, 4.0);
 
+    // Waypoints
+    if (props.waypoints) {
+      props.waypoints.forEach((wp) => {
+        addSphere(wp, '#45caf0', 1.35, 3.2);
+      });
+    }
+
+    // Sensitivity preview route
+    if (props.previewRoute && props.previewRoute.path.length > 1) {
+      const previewPoints = props.previewRoute.path.map((p) => world(p));
+      const previewGeom = new THREE.BufferGeometry().setFromPoints(previewPoints);
+      const previewMat = new THREE.LineDashedMaterial({
+        color: '#ffffff',
+        dashSize: 1.5,
+        gapSize: 0.8,
+        transparent: true,
+        opacity: 0.9,
+      });
+      const previewLine = new THREE.Line(previewGeom, previewMat);
+      previewLine.computeLineDistances();
+      previewLine.position.z += 1.0;
+      overlay.add(previewLine);
+    }
+
+    // Deviation point locator from RouteExplainability
+    if (props.deviationPoint) {
+      addSphere(props.deviationPoint, '#f7df72', 1.7, 4.5);
+    }
+
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     if (camera && controls) {
@@ -290,7 +353,20 @@ export default function TerrainScene(props: Props) {
       controls.target.set(0, 0, 2);
       controls.update();
     }
-  }, [props.routes, props.selectedRoute, props.start, props.goal, props.obstacles, props.viewMode, props.terrain, props.evaPosition, props.returnPath]);
+  }, [
+    props.routes,
+    props.selectedRoute,
+    props.start,
+    props.goal,
+    props.obstacles,
+    props.viewMode,
+    props.terrain,
+    props.evaPosition,
+    props.returnPath,
+    props.waypoints,
+    props.previewRoute,
+    props.deviationPoint,
+  ]);
 
-  return <div className="terrain-canvas" ref={mountRef} aria-label="Interactive synthetic 3D terrain. Drag to orbit, scroll to zoom, click to set route points." />;
+  return <div className="terrain-canvas" ref={mountRef} aria-label="Interactive 3D terrain model derived from an imported Mars DEM. Drag to orbit, scroll to zoom, click to set route points." />;
 }

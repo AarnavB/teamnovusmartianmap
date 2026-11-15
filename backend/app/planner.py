@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import heapq
 import math
+from collections import deque
+from time import perf_counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -122,7 +124,7 @@ class MultiObjectiveAStar:
     result an explicitly approximate Pareto search rather than an exact full
     frontier enumeration.
     """
-    def __init__(self, terrain: Terrain, constraints: MissionConstraints, profile: str, max_labels_per_cell: int = 7):
+    def __init__(self, terrain: Terrain, constraints: MissionConstraints, profile: str, max_labels_per_cell: int = 3, edge_cache: dict[tuple[int, int, int, int], tuple[float, ...] | None] | None = None):
         if profile not in PROFILES:
             raise ValueError(f"Unknown route profile: {profile}")
         self.terrain = terrain
@@ -131,19 +133,27 @@ class MultiObjectiveAStar:
         base_weights = PROFILES[profile]
         multipliers = constraints.objective_weight_multipliers
         adjusted = {key: value * multipliers.get(key, 1.0) for key, value in base_weights.items()}
-        # Never let an unavailable spatial layer influence route preference via
-        # a constant placeholder. Its uncertainty remains represented separately.
-        if "atmosphere" not in terrain.available_layers:
+        # Unavailable layers are excluded completely. Do not replace missing
+        # soil, atmospheric, radiation, uncertainty or science rasters with
+        # guessed constants and then present those guesses as route evidence.
+        if "atmosphere" not in terrain.available_layers or terrain.environment_index is None:
             adjusted["environment_risk"] = 0.0
-        if "radiation" not in terrain.available_layers:
+        if "radiation" not in terrain.available_layers or terrain.radiation_index is None:
             adjusted["radiation"] = 0.0
-        if "science" not in terrain.available_layers:
+        if "uncertainty" not in terrain.available_layers or terrain.uncertainty is None:
+            adjusted["uncertainty"] = 0.0
+        if "science" not in terrain.available_layers or terrain.science_potential is None:
             adjusted["science_opportunity_cost"] = 0.0
         total_weight = sum(adjusted.values())
         if total_weight <= 0:
             raise ValueError("At least one objective weight multiplier must be greater than zero.")
         self.weights = {key: value / total_weight for key, value in adjusted.items()}
         self.max_labels_per_cell = max_labels_per_cell
+        # The route profiles share edge vectors; terrain/constraint calculations
+        # are identical even though the three profiles use different weights.
+        self.edge_cache = edge_cache if edge_cache is not None else {}
+        self.edge_cache_hits = 0
+        self.edge_cache_misses = 0
         self.expanded = 0
         self.generated = 0
 
@@ -159,6 +169,16 @@ class MultiObjectiveAStar:
         return all(x <= y + eps for x, y in zip(a, b)) and any(x < y - eps for x, y in zip(a, b))
 
     def _edge_vector(self, x0: int, y0: int, x1: int, y1: int) -> tuple[float, ...] | None:
+        key = (x0, y0, x1, y1)
+        if key in self.edge_cache:
+            self.edge_cache_hits += 1
+            return self.edge_cache[key]
+        self.edge_cache_misses += 1
+        edge = self._compute_edge_vector(x0, y0, x1, y1)
+        self.edge_cache[key] = edge
+        return edge
+
+    def _compute_edge_vector(self, x0: int, y0: int, x1: int, y1: int) -> tuple[float, ...] | None:
         t = self.terrain
         c = self.constraints
         if t.is_blocked(x1, y1, c.max_slope_deg, c.max_temperature_c):
@@ -171,16 +191,16 @@ class MultiObjectiveAStar:
         distance_m = diagonal * t.cell_m
         target_slope = t.slope_deg[y1][x1]
         avg_slope = (t.slope_deg[y0][x0] + target_slope) / 2.0
-        avg_rough = (t.roughness[y0][x0] + t.roughness[y1][x1]) / 2.0 if "roughness" in t.available_layers else 0.65
-        avg_regolith = (t.regolith[y0][x0] + t.regolith[y1][x1]) / 2.0 if "regolith" in t.available_layers else 0.65
-        avg_env = (t.environment_index[y0][x0] + t.environment_index[y1][x1]) / 2.0 if "atmosphere" in t.available_layers else 0.5
-        avg_rad = (t.radiation_index[y0][x0] + t.radiation_index[y1][x1]) / 2.0 if "radiation" in t.available_layers else 0.5
-        avg_uncertainty = (t.uncertainty[y0][x0] + t.uncertainty[y1][x1]) / 2.0
-        science = max(t.science_potential[y0][x0], t.science_potential[y1][x1])
+        avg_rough = (t.roughness[y0][x0] + t.roughness[y1][x1]) / 2.0 if "roughness" in t.available_layers else 0.0
+        avg_regolith = (t.regolith[y0][x0] + t.regolith[y1][x1]) / 2.0 if "regolith" in t.available_layers and t.regolith is not None else 0.0
+        avg_env = (t.environment_index[y0][x0] + t.environment_index[y1][x1]) / 2.0 if "atmosphere" in t.available_layers and t.environment_index is not None else 0.0
+        avg_rad = (t.radiation_index[y0][x0] + t.radiation_index[y1][x1]) / 2.0 if "radiation" in t.available_layers and t.radiation_index is not None else 0.0
+        avg_uncertainty = (t.uncertainty[y0][x0] + t.uncertainty[y1][x1]) / 2.0 if "uncertainty" in t.available_layers and t.uncertainty is not None else 0.0
+        science = max(t.science_potential[y0][x0], t.science_potential[y1][x1]) if "science" in t.available_layers and t.science_potential is not None else 0.0
 
         # Illustrative mobility model, not a validated human-performance model.
         slope_factor = 1.0 + (avg_slope / max(c.max_slope_deg, 1.0)) * 1.8
-        mobility_factor = 1.0 + 0.55 * avg_rough + 0.35 * avg_regolith
+        mobility_factor = 1.0 + 0.55 * avg_rough + (0.35 * avg_regolith if "regolith" in t.available_layers else 0.0)
         total_carried_mass = c.suit_mass_kg + c.carried_equipment_mass_kg
         mass_factor = total_carried_mass / 54.5
         load_speed_factor = 1.0 + 0.10 * max(0.0, mass_factor - 1.0)
@@ -196,7 +216,13 @@ class MultiObjectiveAStar:
         # negative reward edge is introduced, preserving A* assumptions.
         max_range = t.max_path_distance_m
         length_fraction = distance_m / max_range
-        terrain_risk = _clamp01(0.50 * target_slope / max(c.max_slope_deg, 1.0) + 0.30 * avg_rough + 0.20 * avg_regolith)
+        slope_risk = target_slope / max(c.max_slope_deg, 1.0)
+        if "regolith" in t.available_layers:
+            terrain_risk = _clamp01(0.50 * slope_risk + 0.30 * avg_rough + 0.20 * avg_regolith)
+        else:
+            # Renormalize only measured/derived terrain factors; no regolith
+            # placeholder is introduced when the site has no soil raster.
+            terrain_risk = _clamp01((0.50 * slope_risk + 0.30 * avg_rough) / 0.80)
         environment_risk = _clamp01(avg_env)
         return (
             distance_m / max_range,
@@ -214,6 +240,29 @@ class MultiObjectiveAStar:
         # Reserve a configurable fraction for contingencies and return travel.
         allowed_fraction = (1.0 - self.constraints.return_reserve_fraction) / 2.0
         return costs[1] <= allowed_fraction and costs[2] <= allowed_fraction and costs[8] <= allowed_fraction
+
+    def _hard_constraint_path_exists(self, start: tuple[int, int], goal: tuple[int, int]) -> bool:
+        """Check grid connectivity without resource limits to explain failed searches."""
+        queue = deque([start])
+        visited = {start}
+        while queue:
+            x, y = queue.popleft()
+            if (x, y) == goal:
+                return True
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+                nx, ny = x + dx, y + dy
+                point = (nx, ny)
+                if point in visited or self.terrain.is_blocked(nx, ny, self.constraints.max_slope_deg, self.constraints.max_temperature_c):
+                    continue
+                if dx and dy:
+                    if (
+                        self.terrain.is_blocked(nx, y, self.constraints.max_slope_deg, self.constraints.max_temperature_c)
+                        or self.terrain.is_blocked(x, ny, self.constraints.max_slope_deg, self.constraints.max_temperature_c)
+                    ):
+                        continue
+                visited.add(point)
+                queue.append(point)
+        return False
 
     def search(self, start: tuple[int, int], goal: tuple[int, int]) -> dict[str, Any]:
         t = self.terrain
@@ -233,6 +282,7 @@ class MultiObjectiveAStar:
         goal_label: int | None = None
         self.expanded = 0
         self.generated = 1
+        self.resource_pruned = False
 
         while queue:
             _, _, label_id = heapq.heappop(queue)
@@ -281,7 +331,18 @@ class MultiObjectiveAStar:
                 heapq.heappush(queue, (priority, serial, new_id))
 
         if goal_label is None:
-            raise ValueError("No route satisfies the hard constraints and resource reserve")
+            if self._hard_constraint_path_exists(start, goal):
+                raise ValueError(
+                    "A terrain-valid path exists, but at least one EVA time budget, energy budget, or oxygen budget is too small "
+                    "after preserving the configured return reserve. Increase the corresponding resource "
+                    "budget or choose a closer destination. Changing objective-weight preferences does not "
+                    "override hard resource limits."
+                )
+            raise ValueError(
+                "The hard terrain constraints disconnect the selected start and destination. "
+                "Choose different map points or adjust the maximum-slope limit within the allowed range. "
+                "NoData cells and steep terrain remain blocked."
+            )
 
         path: list[tuple[int, int]] = []
         cursor: int | None = goal_label
@@ -305,12 +366,16 @@ def _clamp01(v: float) -> float:
 
 
 def route_metrics(terrain: Terrain, path: list[tuple[int, int]], constraints: MissionConstraints) -> dict[str, Any]:
+    has_environment = "atmosphere" in terrain.available_layers and terrain.environment_index is not None
+    has_radiation = "radiation" in terrain.available_layers and terrain.radiation_index is not None
+    has_uncertainty = "uncertainty" in terrain.available_layers and terrain.uncertainty is not None
+    has_science = "science" in terrain.available_layers and terrain.science_potential is not None
     if len(path) < 2:
         return {
             "distance_m": 0.0, "duration_min": 0.0, "energy_wh": 0.0,
-            "terrain_risk_pct": 0.0, "environment_risk_pct": 0.0,
-            "radiation_index_pct": 0.0, "uncertainty_pct": 0.0,
-            "scientific_value_pct": 0.0, "return_feasible": True,
+            "terrain_risk_pct": 0.0, "environment_risk_pct": None,
+            "radiation_index_pct": None, "uncertainty_pct": None,
+            "scientific_value_pct": None, "return_feasible": True,
             "oxygen_l": 0.0, "return_oxygen_l": 0.0,
             "communication_assessment": "UNAVAILABLE_NO_VERIFIED_RELAY_COVERAGE_DATA",
         }
@@ -323,10 +388,10 @@ def route_metrics(terrain: Terrain, path: list[tuple[int, int]], constraints: Mi
     for (x0, y0), (x1, y1) in zip(path[:-1], path[1:]):
         d = math.hypot(x1 - x0, y1 - y0) * terrain.cell_m
         avg_slope = (terrain.slope_deg[y0][x0] + terrain.slope_deg[y1][x1]) / 2.0
-        avg_rough = (terrain.roughness[y0][x0] + terrain.roughness[y1][x1]) / 2.0 if "roughness" in terrain.available_layers else 0.65
-        avg_reg = (terrain.regolith[y0][x0] + terrain.regolith[y1][x1]) / 2.0 if "regolith" in terrain.available_layers else 0.65
+        avg_rough = (terrain.roughness[y0][x0] + terrain.roughness[y1][x1]) / 2.0 if "roughness" in terrain.available_layers else 0.0
+        avg_reg = (terrain.regolith[y0][x0] + terrain.regolith[y1][x1]) / 2.0 if "regolith" in terrain.available_layers and terrain.regolith is not None else 0.0
         slope_factor = 1.0 + (avg_slope / max(constraints.max_slope_deg, 1.0)) * 1.8
-        mobility_factor = 1.0 + 0.55 * avg_rough + 0.35 * avg_reg
+        mobility_factor = 1.0 + 0.55 * avg_rough + (0.35 * avg_reg if "regolith" in terrain.available_layers else 0.0)
         total_carried_mass = constraints.suit_mass_kg + constraints.carried_equipment_mass_kg
         mass_factor = total_carried_mass / 54.5
         load_speed_factor = 1.0 + 0.10 * max(0.0, mass_factor - 1.0)
@@ -337,21 +402,26 @@ def route_metrics(terrain: Terrain, path: list[tuple[int, int]], constraints: Mi
         total_time += edge_time_min * 60.0
         total_energy += d * 0.018 * mass_factor * slope_factor * mobility_factor
         total_oxygen += edge_time_min * constraints.oxygen_consumption_lpm
-        terrain_vals.append(_clamp01(0.50 * avg_slope / max(constraints.max_slope_deg, 1.0) + 0.30 * avg_rough + 0.20 * avg_reg))
-        if "atmosphere" in terrain.available_layers:
+        slope_risk = avg_slope / max(constraints.max_slope_deg, 1.0)
+        risk = (0.50 * slope_risk + 0.30 * avg_rough + 0.20 * avg_reg) if "regolith" in terrain.available_layers else (0.50 * slope_risk + 0.30 * avg_rough) / 0.80
+        terrain_vals.append(_clamp01(risk))
+        if has_environment:
             env_vals.append((terrain.environment_index[y0][x0] + terrain.environment_index[y1][x1]) / 2.0)
-        if "radiation" in terrain.available_layers:
+        if has_radiation:
             rad_vals.append((terrain.radiation_index[y0][x0] + terrain.radiation_index[y1][x1]) / 2.0)
-        uncertainty_vals.append((terrain.uncertainty[y0][x0] + terrain.uncertainty[y1][x1]) / 2.0)
-        if "science" in terrain.available_layers:
+        if has_uncertainty:
+            uncertainty_vals.append((terrain.uncertainty[y0][x0] + terrain.uncertainty[y1][x1]) / 2.0)
+        if has_science:
             science_vals.append(max(terrain.science_potential[y0][x0], terrain.science_potential[y1][x1]))
     duration_min = total_time / 60.0
     return_budget_min = constraints.eva_limit_minutes * (1.0 - constraints.return_reserve_fraction)
     return_budget_wh = constraints.energy_budget_wh * (1.0 - constraints.return_reserve_fraction)
     return_budget_oxygen = constraints.oxygen_budget_l * (1.0 - constraints.return_reserve_fraction)
     return_feasible = (2.0 * duration_min <= return_budget_min) and (2.0 * total_energy <= return_budget_wh) and (2.0 * total_oxygen <= return_budget_oxygen)
-    avg = lambda xs: (sum(xs) / len(xs) * 100.0) if xs else 0.0
-    science_score = avg(science_vals)
+
+    def mean_pct(values: list[float]) -> float | None:
+        return round(sum(values) / len(values) * 100.0, 1) if values else None
+
     nearby_targets = []
     for target in terrain.targets:
         best = min(math.hypot(target["x"] - x, target["y"] - y) for x, y in path)
@@ -361,11 +431,11 @@ def route_metrics(terrain: Terrain, path: list[tuple[int, int]], constraints: Mi
         "distance_m": round(total_distance, 1),
         "duration_min": round(duration_min, 1),
         "energy_wh": round(total_energy, 2),
-        "terrain_risk_pct": round(avg(terrain_vals), 1),
-        "environment_risk_pct": round(avg(env_vals), 1) if env_vals else None,
-        "radiation_index_pct": round(avg(rad_vals), 1) if rad_vals else None,
-        "uncertainty_pct": round(avg(uncertainty_vals), 1),
-        "scientific_value_pct": round(science_score, 1) if science_vals else None,
+        "terrain_risk_pct": round(sum(terrain_vals) / len(terrain_vals) * 100.0, 1) if terrain_vals else None,
+        "environment_risk_pct": mean_pct(env_vals),
+        "radiation_index_pct": mean_pct(rad_vals),
+        "uncertainty_pct": mean_pct(uncertainty_vals),
+        "scientific_value_pct": mean_pct(science_vals),
         "return_feasible": return_feasible,
         "nearby_targets": nearby_targets,
         "return_time_estimate_min": round(duration_min * 2.0, 1),
@@ -374,7 +444,7 @@ def route_metrics(terrain: Terrain, path: list[tuple[int, int]], constraints: Mi
         "return_oxygen_l": round(total_oxygen * 2.0, 2),
         "communication_assessment": "UNAVAILABLE_NO_VERIFIED_RELAY_COVERAGE_DATA",
         "available_terrain_layers": sorted(terrain.available_layers),
-        "model_note": "Illustrative mobility/oxygen model. Suit mass, equipment mass, rest allowance and oxygen consumption are configurable research assumptions, not validated EVA performance. Environment, radiation and science values are N/A unless spatially registered layers exist; unavailable objectives are removed from route weights rather than filled with invented measurements.",
+        "model_note": "Elevation, slope and roughness are derived from the imported DEM. Mobility, time, energy and oxygen are illustrative research assumptions, not validated EVA performance. Regolith, atmospheric, radiation, uncertainty and science scores remain N/A unless real spatially registered layers are imported.",
         "carried_mass_kg": round(constraints.suit_mass_kg + constraints.carried_equipment_mass_kg, 1),
     }
 
@@ -382,17 +452,35 @@ def route_metrics(terrain: Terrain, path: list[tuple[int, int]], constraints: Mi
 def build_route_set(terrain: Terrain, start: tuple[int, int], goal: tuple[int, int], constraints: MissionConstraints) -> list[dict[str, Any]]:
     labels = {
         "conservative": ("A", "CONSERVATIVE", "Risk-and-uncertainty weighted alternative"),
-        "balanced": ("B", "BALANCED", "Compromise across movement, risk and science"),
-        "science_first": ("C", "SCIENCE-FIRST", "Seek simulated targets without relaxing hard constraints"),
+        "balanced": ("B", "BALANCED", "Compromise across movement and available terrain evidence"),
+        "science_first": ("C", "SCIENCE-FIRST", "Use science layers only when real spatial science data are available"),
     }
     routes: list[dict[str, Any]] = []
+    profile_errors: list[str] = []
+    # The three profiles search the same graph with different scalar weights.
+    # Reuse edge vectors between them and cap the approximate Pareto frontier
+    # at three labels per cell to reduce repeated work and memory use.
+    shared_edge_cache: dict[tuple[int, int, int, int], tuple[float, ...] | None] = {}
     for profile, (route_id, title, summary) in labels.items():
-        model = MultiObjectiveAStar(terrain, constraints, profile)
-        search = model.search(start, goal)
+        model = MultiObjectiveAStar(
+            terrain, constraints, profile,
+            max_labels_per_cell=3,
+            edge_cache=shared_edge_cache,
+        )
+        started = perf_counter()
+        try:
+            search = model.search(start, goal)
+        except ValueError as exc:
+            profile_errors.append(f"{profile}: {exc}")
+            continue
+        search["runtime_ms"] = round((perf_counter() - started) * 1000.0, 2)
+        search["edge_cache_hits"] = model.edge_cache_hits
+        search["edge_cache_misses"] = model.edge_cache_misses
+        search["max_labels_per_cell"] = model.max_labels_per_cell
         metrics = route_metrics(terrain, search["path"], constraints)
-        science_available = "science" in terrain.available_layers
+        science_available = "science" in terrain.available_layers and terrain.science_potential is not None
         display_title = title if science_available or profile != "science_first" else "SCIENCE-FIRST (NO SCIENCE LAYER)"
-        display_summary = summary if science_available or profile != "science_first" else "No georeferenced science-potential layer is loaded. Scientific discovery is not optimized; this is a baseline alternative only."
+        display_summary = summary if science_available or profile != "science_first" else "No georeferenced science-potential layer is loaded. This profile is a baseline alternative, not a science-target route."
         routes.append({
             "id": route_id, "profile": profile, "name": display_title, "summary": display_summary,
             "path": [{"x": x, "y": y} for x, y in search["path"]],
@@ -400,6 +488,10 @@ def build_route_set(terrain: Terrain, start: tuple[int, int], goal: tuple[int, i
             "search": {k: v for k, v in search.items() if k != "path"},
             "weights": model.weights,
         })
+    if not routes:
+        detail = profile_errors[0] if profile_errors else "No profile produced a feasible path."
+        raise ValueError(detail)
+
     for route in routes:
         route["is_pareto"] = not any(
             _route_dominates(other["metrics"], route["metrics"])

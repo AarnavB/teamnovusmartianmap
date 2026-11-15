@@ -126,7 +126,7 @@ h_p(n)=w_{distance,p}\frac{D_{Euclidean}(n,goal)}{L_{max}}
 
 All other heuristic components are zero. Since each edge's distance contribution is at least the Euclidean distance between adjacent cell centres and all other terms are non-negative, this is an admissible and consistent lower bound for the scalarized objective on the 8-connected metric grid. When the distance multiplier is zero, the heuristic is zero.
 
-The implementation retains at most seven labels per cell. When the cap is hit, it drops the highest current scalar-score label. This bounds memory and runtime but can discard a useful nondominated label. This is a **bounded approximate Pareto A*** variant, not an exact enumeration of the global Pareto frontier. The three policy routes are representative solutions, not an exhaustive set of all possible non-dominated routes.
+The implementation retains at most three labels per cell. When the cap is hit, it drops the highest current scalar-score label. This bounds memory and runtime but can discard a useful nondominated label. This is a **bounded approximate Pareto A*** variant, not an exact enumeration of the global Pareto frontier. The three policy routes are representative solutions, not an exhaustive set of all possible non-dominated routes.
 
 ## 6. Metrics and Pareto comparison
 

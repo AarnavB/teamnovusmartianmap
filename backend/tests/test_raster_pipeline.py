@@ -7,7 +7,7 @@ rasterio = pytest.importorskip("rasterio")
 from rasterio.transform import from_origin
 from rasterio.crs import CRS
 
-from app.domain.raster_pipeline import dem_to_terrain, import_aligned_layer, inspect_geotiff
+from app.domain.raster_pipeline import dem_to_terrain, import_aligned_layer, inspect_geotiff, validate_site_coverage
 
 MARS_CRS = CRS.from_proj4("+proj=eqc +lat_ts=0 +lat_0=0 +lon_0=0 +a=3396190 +b=3376200 +units=m +no_defs +type=crs")
 
@@ -21,6 +21,39 @@ def _write(path, values, crs=MARS_CRS, transform=None, unit="m"):
         dst.write(arr, 1)
         dst.set_band_description(1, "test band")
         dst.set_band_unit(1, unit)
+
+
+def test_site_coverage_uses_pyproj_crs_and_planetocentric_latitude(tmp_path):
+    from pyproj import CRS as PyprojCRS, Transformer
+
+    projected = PyprojCRS.from_wkt(MARS_CRS.to_wkt())
+    geographic = projected.geodetic_crs
+    latitude_planetocentric = 24.0
+    longitude_east = 37.0
+    ellipsoid = geographic.ellipsoid
+    semi_major = float(ellipsoid.semi_major_metre)
+    semi_minor = float(ellipsoid.semi_minor_metre)
+    latitude_planetographic = np.degrees(np.arctan2(
+        semi_major ** 2 * np.sin(np.radians(latitude_planetocentric)),
+        semi_minor ** 2 * np.cos(np.radians(latitude_planetocentric)),
+    ))
+    transformer = Transformer.from_crs(geographic, projected, always_xy=True)
+    center_x, center_y = transformer.transform(longitude_east, latitude_planetographic)
+
+    path = tmp_path / "site_coverage.tif"
+    _write(
+        path,
+        np.ones((100, 100), dtype=np.float32),
+        transform=from_origin(center_x - 500.0, center_y + 500.0, 10.0, 10.0),
+    )
+    coverage = validate_site_coverage(
+        path,
+        latitude=latitude_planetocentric,
+        longitude_east=longitude_east,
+    )
+
+    assert coverage["coverage_verified"] is True
+    assert coverage["reference_latitude_planetographic_for_transform"] == pytest.approx(latitude_planetographic)
 
 
 def test_mars_dem_ingest_derives_slope_and_roughness_and_keeps_unknowns(tmp_path):
@@ -37,6 +70,26 @@ def test_mars_dem_ingest_derives_slope_and_roughness_and_keeps_unknowns(tmp_path
     assert terrain.slope_deg[10][10] > 0
     assert provenance["source_sha256"]
     assert provenance["layers_unavailable"]
+
+
+def test_site_centred_route_grid_uses_local_dem_window(tmp_path):
+    y, x = np.indices((1024, 1024))
+    dem = (100 + x * 0.01 + y * 0.02).astype(np.float32)
+    path = tmp_path / "large_mars_mosaic.tif"
+    _write(path, dem, transform=from_origin(-5120, 5120, 10, 10))
+
+    terrain, provenance = dem_to_terrain(
+        path,
+        width=96,
+        height=96,
+        window_center_xy_m=(0.0, 0.0),
+        window_size_m=2400.0,
+    )
+
+    assert terrain.cell_m == pytest.approx(25.0, abs=0.2)
+    assert terrain.coordinate_info["bounds"] == pytest.approx([-1200.0, -1200.0, 1200.0, 1200.0], abs=10.0)
+    assert provenance["processing"]["route_grid"] == [96, 96]
+    assert provenance["processing"]["route_grid_window_size_m"] == pytest.approx([2400.0, 2400.0], abs=10.0)
 
 
 def test_earth_metre_crs_is_not_accepted_as_mars(tmp_path):
