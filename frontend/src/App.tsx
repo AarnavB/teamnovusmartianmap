@@ -982,6 +982,8 @@ export default function App() {
                   onExportReplay={() => void downloadReport('json')}
                   exporting={reportLoading}
                   scienceTargets={selectedScienceTargets}
+                  cellSizeM={terrain?.cell_size_m ?? 1}
+                  onExportSummary={() => void downloadReport('markdown')}
                 />
               )}
 

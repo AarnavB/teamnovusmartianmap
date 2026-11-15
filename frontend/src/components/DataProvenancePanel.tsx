@@ -48,12 +48,12 @@ export default function DataProvenancePanel({ missionSite, terrain, sources }: P
   return <section className="provenance-panel">
     <div className="provenance-heading"><div><span className="eyebrow">DATA LINEAGE</span><h3>Data provenance & confidence</h3><p>Trace the sources, processing and coverage behind the active terrain view.</p></div><span className="provenance-stamp">SOURCE-AWARE</span></div>
     <div className="provenance-active">
-      <div className="provenance-section-title"><span>ACTIVE TERRAIN PRODUCT</span><b>{terrain ? terrain.status.toUpperCase() : 'NOT LOADED'}</b></div>
+      <div className="provenance-section-title"><span>SELECTED SITE REFERENCE DATASET</span><b>{terrain ? terrain.status.toUpperCase() : 'NOT LOADED'}</b></div>
       <h4>{missionSite.dem.product}</h4>
       <div className="provenance-grid">
-        <Field label="Source organisation" value={missionSite.dem.source}/>
-        <Field label="Native product resolution" value={missionSite.dem.resolutionM ? `${missionSite.dem.resolutionM} m / pixel` : null}/>
-        <Field label="File format" value={missionSite.dem.format}/>
+        <Field label="Reference source organisation" value={missionSite.dem.source}/>
+        <Field label="Reference product resolution" value={missionSite.dem.resolutionM ? `${missionSite.dem.resolutionM} m / pixel` : null}/>
+        <Field label="Reference product format" value={missionSite.dem.format}/>
         <Field label="Loaded grid" value={terrain ? `${terrain.width} × ${terrain.height} cells` : null}/>
         <Field label="Grid cell size" value={terrain ? `${terrain.cell_size_m.toFixed(2)} m` : null}/>
         <Field label="Vertical units" value={terrain?.cell_units}/>
@@ -62,6 +62,7 @@ export default function DataProvenancePanel({ missionSite, terrain, sources }: P
       </div>
       <div className="provenance-links"><a href={missionSite.dem.downloadUrl} target="_blank" rel="noreferrer">Original product / download ↗</a><a href={missionSite.dem.documentationUrl} target="_blank" rel="noreferrer">Product documentation ↗</a><a href={missionSite.coordinateSourceUrl} target="_blank" rel="noreferrer">Landing-coordinate reference ↗</a></div>
       <p className="provenance-note">{missionSite.dem.coverageNote}</p>
+      <p className="provenance-warning">The dataset above is the selected site's catalogue reference, not proof of the identity of an operator-uploaded raster. The current terrain response does not expose the original DEM filename or full source SHA-256; check the original product label when verifying a manually imported file.</p>
       {terrain?.warning && <p className="provenance-warning">{terrain.warning}</p>}
     </div>
 
@@ -85,7 +86,7 @@ export default function DataProvenancePanel({ missionSite, terrain, sources }: P
       const hasImport = Object.keys(metadata).length > 0;
       const derived = row.id === 'slope' || row.id === 'roughness' || row.id === 'coverage_mask';
       const lineage = hasImport ? displayMetadata(metadata) : row.id === 'elevation'
-        ? `DEM source: ${missionSite.dem.fileName}; see the source product label and documentation.`
+        ? `Elevation grid received. The current terrain response does not expose the original DEM filename or full source SHA-256. Selected-site catalogue reference: ${missionSite.dem.fileName}.`
         : derived ? row.method : isAvailable ? 'Layer is marked available; detailed import metadata is not present in the active terrain response.' : 'Unavailable — no aligned raster or layer metadata is present.';
       return <article className="provenance-layer" key={row.id}>
         <div className="provenance-layer-heading"><strong>{row.label}</strong><span className={isAvailable ? 'available' : 'unavailable'}>{isAvailable ? 'AVAILABLE' : 'UNAVAILABLE'}</span></div>
