@@ -74,7 +74,8 @@ def test_each_mission_site_has_a_distinct_labeled_test_terrain(monkeypatch):
     assert jezero.json()["status"] == "SIMULATED_NOT_GEOREFERENCED"
     assert "synthetic teaching grid" in gale.json()["name"]
     assert gale.json()["coordinate_info"]["georeferenced"] is False
-    assert legacy.json()["site_id"] == "jezero"
+    assert legacy.status_code == 400
+    assert "Select one of the four supported mission sites" in legacy.json()["detail"]
 
 
 def test_routes_use_requested_mission_site(monkeypatch):
