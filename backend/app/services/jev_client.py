@@ -153,6 +153,12 @@ def _classify_error_response(response: httpx.Response, data: Any) -> tuple[int, 
         else ""
     )
 
+    if status == 503 and detail and (
+        "authentication is not configured" in detail.lower()
+        or "service token is not configured" in detail.lower()
+    ):
+        return (503, detail, False)
+
     if status in (502, 503, 504, 529):
         fallback = "JEV decision service or provider is temporarily unavailable. The static balanced route remains available."
         return (504 if status == 504 else 503, detail or fallback, True)
