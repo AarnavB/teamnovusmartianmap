@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 import json
 import os
+import threading
+import logging
 import uuid
 from time import perf_counter
 from pathlib import Path
@@ -29,10 +31,11 @@ from .domain.offline_package import create_package
 from .domain.pds_labels import inspect_label as inspect_pds_label, save_label as save_pds_label
 from .services.wmts import LAYERS as WMTS_LAYERS, get_capabilities as get_wmts_capabilities, download_tile_cache, inspect_cached_packages
 from .services.official_downloads import download_official_file, DownloadError
+from .services.dem_cache import DemSourceError, DemValidationError, DemCacheError, load_or_fetch_site_terrain, cache_mode
 
 app = FastAPI(
     title="MARSCOPE API",
-    version="0.3.1",
+    version="0.4.0",
     description="Research prototype for Mars human-traversal route-planning concepts. It is not certified navigation software.",
 )
 def _configured_cors_origins() -> list[str]:
@@ -54,10 +57,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# The service starts with no active terrain. Only imported, verified Mars DEMs
-# may be used for route planning.
+# Terrain is loaded lazily on first site selection/request. The lock prevents
+# simultaneous requests in one worker from downloading the same large DEM twice.
 TERRAINS: dict[str, Terrain] = {}
 PLAN_SESSIONS: dict[str, dict[str, Any]] = {}
+_TERRAIN_LOAD_LOCK = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 def _terrain_for_site(site_id: str) -> Terrain:
@@ -65,17 +70,33 @@ def _terrain_for_site(site_id: str) -> Terrain:
         raise HTTPException(status_code=404, detail=f"Unknown mission site '{site_id}'.")
     selected = TERRAINS.get(site_id)
     if selected is None:
-        site = MISSION_SITES[site_id]
-        dem = site["dem"]
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"No real DEM is loaded for {site['name']}. Download and import the catalogued "
-                f"{dem['product']} for this site. Synthetic terrain and another site's raster are never used as fallbacks."
-            ),
-        )
-    if selected.status == "SIMULATED_NOT_GEOREFERENCED":
-        raise HTTPException(status_code=409, detail="Synthetic terrain is disabled. Import a verified Mars DEM for this site.")
+        with _TERRAIN_LOAD_LOCK:
+            selected = TERRAINS.get(site_id)
+            if selected is None:
+                site = MISSION_SITES[site_id]
+                try:
+                    selected = load_or_fetch_site_terrain(site_id, site)
+                except DemSourceError as exc:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Automatic official DEM download failed for {site['name']}: {exc}",
+                    ) from exc
+                except DemValidationError as exc:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"The official {site['name']} DEM was downloaded but rejected by validation: {exc}",
+                    ) from exc
+                except DemCacheError as exc:
+                    raise HTTPException(status_code=503, detail=f"DEM cache configuration/storage error: {exc}") from exc
+                except Exception as exc:
+                    logger.exception("Unexpected automatic DEM load failure for %s", site_id)
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Could not prepare the official {site['name']} DEM. No synthetic terrain was substituted.",
+                    ) from exc
+                TERRAINS[site_id] = selected
+    if selected.status != "NASA_OR_USER_SUPPLIED_GEOREFERENCED_DEM":
+        raise HTTPException(status_code=409, detail="Unverified or synthetic terrain is disabled. No fallback terrain is available.")
     return selected
 
 
@@ -104,7 +125,7 @@ def jezero_pois() -> dict[str, Any]:
             "documentation": "https://astrogeology.usgs.gov/search/map/mars_2020_science_investigation_ctx_dem_mosaic",
             "pixel_scale_m": 20,
             "format": "GeoTIFF",
-            "vertical_units": "metres (verify source label before import)",
+            "vertical_units": "metres (USGS source metadata)",
         },
         "points": [
             {"id": "jezero-centre", "name": "Jezero Crater Centre", "latitude": 18.4100, "longitude_east": 77.6900, "precision": "approximate reference point", "description": "Regional reference point for the Jezero study area."},
@@ -112,16 +133,16 @@ def jezero_pois() -> dict[str, Any]:
             {"id": "neretva-vallis", "name": "Neretva Vallis", "latitude": 18.4006, "longitude_east": 77.1860, "precision": "approximate reference point", "description": "Western inlet-channel area."},
             {"id": "western-delta", "name": "Western Delta Area", "latitude": 18.3512, "longitude_east": 77.2757, "precision": "approximate reference point", "description": "Western delta study area."},
         ],
-        "notice": "These are geographic reference points, not verified pixels or grid coordinates. Route planning remains on the currently active terrain grid until a CRS-checked Jezero DEM is imported and mapped to the planner grid.",
+        "notice": "These are geographic reference points, not verified pixels or grid coordinates. Selecting Jezero automatically fetches and validates its catalogued real DEM before route planning."
     }
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "project": "MARSCOPE", "release": "0.3.1"}
+    return {"status": "ok", "project": "MARSCOPE", "release": "0.4.0"}
 
 @app.get("/api/terrain")
 def terrain() -> dict[str, Any]:
-    raise HTTPException(status_code=409, detail="No default terrain is supplied. Request /api/terrain/{site_id} after importing that site's verified Mars DEM.")
+    raise HTTPException(status_code=400, detail="Select one of the four supported mission sites. Its official DEM is fetched automatically on first request.")
 
 
 @app.get("/api/terrain/{site_id}")
@@ -138,10 +159,12 @@ def sites() -> dict[str, Any]:
                 **site,
                 "terrain_loaded": site_id in TERRAINS,
                 "terrain_id": TERRAINS[site_id].terrain_id if site_id in TERRAINS else None,
+                "automatic_loading": True,
             }
             for site_id, site in MISSION_SITES.items()
         ],
-        "note": "Only the four configured sites are supported. A site is plannable only after its source DEM passes CRS, unit and footprint validation.",
+        "cache_mode": cache_mode(),
+        "note": "Only the four configured sites are supported. Selecting a site automatically fetches its catalogued official DEM when no validated cache exists; CRS, metre units and site footprint are checked before planning. No synthetic fallback is used.",
     }
 
 
@@ -152,7 +175,7 @@ def registry() -> dict[str, Any]:
         "common_coordinate_policy": {
             "recommended_analysis_coordinates": "Local metric working CRS derived from a verified Mars planetary CRS and a site-centred projection.",
             "mars_longitude_latitude": "Preserve planetocentric latitude and east-positive longitude for modern products unless the product label explicitly specifies another convention.",
-            "warning": "No default or synthetic terrain is generated. Import a verified Mars DEM for one of the four supported sites before planning.",
+            "warning": "No default or synthetic terrain is generated. The selected site's official DEM is fetched automatically and validated before planning.",
         },
     }
 
