@@ -112,6 +112,7 @@ def _download_catalogued_dem(site_id: str, site: dict[str, Any], destination: Pa
     current_url = source_url
     total_bytes = 0
     digest = hashlib.sha256()
+    md5_digest = hashlib.md5()
     headers: dict[str, str] = {}
     final_url = source_url
 
@@ -155,6 +156,7 @@ def _download_catalogued_dem(site_id: str, site: dict[str, Any], destination: Pa
                                     f"The catalogued DEM exceeded the {MAX_DEM_DOWNLOAD_BYTES // (1024 * 1024)} MB automatic-download limit."
                                 )
                             digest.update(chunk)
+                            md5_digest.update(chunk)
                             output.write(chunk)
                     break
             else:
@@ -162,6 +164,10 @@ def _download_catalogued_dem(site_id: str, site: dict[str, Any], destination: Pa
 
         if total_bytes == 0:
             raise DemSourceError("The official archive returned an empty DEM file.")
+        expected_md5 = str(dem.get("expected_md5") or "").lower()
+        actual_md5 = md5_digest.hexdigest()
+        if expected_md5 and actual_md5 != expected_md5:
+            raise DemSourceError(f"Downloaded file checksum mismatch: expected MD5 {expected_md5}, received {actual_md5}.")
         temporary.replace(destination)
         return {
             "official_url": source_url,
@@ -169,6 +175,7 @@ def _download_catalogued_dem(site_id: str, site: dict[str, Any], destination: Pa
             "retrieved_utc": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
             "source_filename": dem["filename"],
             "source_sha256": digest.hexdigest(),
+            "source_md5": actual_md5,
             "size_bytes": total_bytes,
             "response_headers": headers,
             "product": dem["product"],
@@ -373,13 +380,20 @@ def load_or_fetch_site_terrain(site_id: str, site: dict[str, Any]) -> Terrain:
 
     if download_record is None:
         digest = hashlib.sha256()
+        md5_digest = hashlib.md5()
         with source_path.open("rb") as source_file:
             for chunk in iter(lambda: source_file.read(1024 * 1024), b""):
                 digest.update(chunk)
+                md5_digest.update(chunk)
+        expected_md5 = str(site["dem"].get("expected_md5") or "").lower()
+        actual_md5 = md5_digest.hexdigest()
+        if expected_md5 and actual_md5 != expected_md5:
+            raise DemValidationError(f"Persistent source file checksum mismatch: expected MD5 {expected_md5}, received {actual_md5}.")
         download_record = {
             "official_url": site["dem"]["url"],
             "source_filename": filename,
             "source_sha256": digest.hexdigest(),
+            "source_md5": actual_md5,
             "size_bytes": source_path.stat().st_size,
             "product": site["dem"]["product"],
             "source": site["dem"]["source"],
