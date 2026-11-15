@@ -100,3 +100,37 @@ def scalar_baseline(
 
 def model_objectives() -> tuple[str, ...]:
     return ("distance", "time", "energy", "terrain_risk", "environment_risk", "radiation", "uncertainty", "science_opportunity_cost", "oxygen")
+
+
+def benchmark_label_caps(
+    terrain: Terrain,
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    constraints: MissionConstraints,
+    caps: tuple[int, ...] = (3, 5),
+) -> list[dict[str, Any]]:
+    """Compare Multi-Objective A* search performance between bounded label capacities."""
+    results: list[dict[str, Any]] = []
+    for cap in caps:
+        shared_cache: dict[tuple[int, int, int, int], tuple[float, ...] | None] = {}
+        model = MultiObjectiveAStar(terrain, constraints, "balanced", max_labels_per_cell=cap, edge_cache=shared_cache)
+        started = perf_counter()
+        search = model.search(start, goal)
+        runtime_ms = round((perf_counter() - started) * 1000.0, 3)
+        metrics = route_metrics(terrain, search["path"], constraints)
+        results.append({
+            "algorithm": f"pareto_astar_cap_{cap}",
+            "runtime_ms": runtime_ms,
+            "expanded_nodes": search.get("expanded_nodes", model.expanded),
+            "generated_labels": search.get("generated_labels", model.generated),
+            "pareto_labels_at_goal": search.get("pareto_labels_at_goal", 0),
+            "max_labels_per_cell": cap,
+            "distance_m": metrics["distance_m"],
+            "duration_min": metrics["duration_min"],
+            "energy_wh": metrics["energy_wh"],
+            "terrain_risk_pct": metrics["terrain_risk_pct"],
+            "scientific_value_pct": metrics["scientific_value_pct"],
+            "return_feasible": metrics["return_feasible"],
+            "path": [{"x": x, "y": y} for x, y in search["path"]],
+        })
+    return results

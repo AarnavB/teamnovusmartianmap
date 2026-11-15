@@ -210,3 +210,32 @@ export type JezeroPoisResponse = {
   points: JezeroPoi[];
   notice: string;
 };
+
+export type SensitivitySweepItem = {
+  value: number;
+  feasible: boolean;
+  distance_m: number | null;
+  duration_min: number | null;
+  energy_wh: number | null;
+  terrain_risk_pct: number | null;
+  return_feasible: boolean;
+  runtime_ms: number | null;
+  path: Point[];
+  route_id: string | null;
+  profile: string | null;
+  error?: string;
+};
+
+export type SensitivityResponse = {
+  site_id: string;
+  parameter: string;
+  parameter_label: string;
+  sweep: SensitivitySweepItem[];
+  terrain_id: string;
+  notice: string;
+};
+
+export type RouteReportResponse = {
+  report_markdown: string;
+  report_json: Record<string, unknown>;
+};
