@@ -44,7 +44,11 @@ class DemCacheError(RuntimeError):
 
 
 def cache_mode() -> str:
-    return "S3-compatible persistent object storage" if os.getenv("MARS_DEM_S3_BUCKET") else "instance-local cache"
+    if os.getenv("MARS_DEM_S3_BUCKET"):
+        return "S3-compatible persistent object storage"
+    if os.getenv("MARS_DEM_CACHE_DIR"):
+        return "configured filesystem cache (persistence depends on the host mount)"
+    return "instance-local cache"
 
 
 def _cache_root() -> Path:
@@ -184,8 +188,6 @@ def _download_catalogued_dem(site_id: str, site: dict[str, Any], destination: Pa
         }
     except (httpx.HTTPError, OSError, ValueError) as exc:
         temporary.unlink(missing_ok=True)
-        if isinstance(exc, DemSourceError):
-            raise
         raise DemSourceError(f"Could not download the official {site['name']} DEM: {exc}") from exc
     finally:
         temporary.unlink(missing_ok=True)
