@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import uuid
+from time import perf_counter
 from pathlib import Path
 from typing import Any
 
@@ -16,13 +17,14 @@ from .lpa import LPAStar
 from .models import BenchmarkRequest, ConditionUpdateRequest, PlanRequest, ReplanRequest
 from .planner import MissionConstraints, build_route_set, route_metrics
 from .registry import get_registry
-from .terrain import SITE_TERRAIN_PROFILES, Terrain, generate_site_terrain
+from .terrain import Terrain
+from .mission_sites import MISSION_SITES, SUPPORTED_SITE_IDS
 from .data_catalog import get_data_catalog
 from .services.archive_clients import ArchiveServiceError, search_pds, resolve_pds_product, search_ode
 from .domain.science_assistant import answer_question, load_evidence
 from .domain.observation_ingest import import_observation_csv
 from .domain.observation_store import save_observation_import, list_observation_imports, get_observation_import
-from .domain.raster_pipeline import dem_to_terrain, inspect_geotiff, import_aligned_layer
+from .domain.raster_pipeline import dem_to_terrain, inspect_geotiff, import_aligned_layer, validate_site_coverage
 from .domain.offline_package import create_package
 from .domain.pds_labels import inspect_label as inspect_pds_label, save_label as save_pds_label
 from .services.wmts import LAYERS as WMTS_LAYERS, get_capabilities as get_wmts_capabilities, download_tile_cache, inspect_cached_packages
@@ -52,19 +54,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-TERRAINS: dict[str, Terrain] = {
-    site_id: generate_site_terrain(site_id) for site_id in SITE_TERRAIN_PROFILES
-}
-# Backward-compatible default used by older clients and legacy package exports.
-TERRAIN: Terrain = TERRAINS["jezero"]
+# The service starts with no active terrain. Only imported, verified Mars DEMs
+# may be used for route planning.
+TERRAINS: dict[str, Terrain] = {}
 PLAN_SESSIONS: dict[str, dict[str, Any]] = {}
 
 
 def _terrain_for_site(site_id: str) -> Terrain:
+    if site_id not in SUPPORTED_SITE_IDS:
+        raise HTTPException(status_code=404, detail=f"Unknown mission site '{site_id}'.")
     selected = TERRAINS.get(site_id)
     if selected is None:
-        raise HTTPException(status_code=404, detail=f"Unknown mission site '{site_id}'.")
+        site = MISSION_SITES[site_id]
+        dem = site["dem"]
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No real DEM is loaded for {site['name']}. Download and import the catalogued "
+                f"{dem['product']} for this site. Synthetic terrain and another site's raster are never used as fallbacks."
+            ),
+        )
+    if selected.status == "SIMULATED_NOT_GEOREFERENCED":
+        raise HTTPException(status_code=409, detail="Synthetic terrain is disabled. Import a verified Mars DEM for this site.")
     return selected
+
+
+def _get_session_planner(session: dict[str, Any]) -> LPAStar:
+    """Initialize LPA* only when a user requests an incremental update."""
+    planner = session.get("planner")
+    if planner is not None:
+        return planner
+    planner = LPAStar(session["terrain"], session["start"], session["goal"], session["constraints"])
+    initial_path = planner.extract_path()
+    if not route_metrics(session["terrain"], initial_path, session["constraints"])["return_feasible"]:
+        raise ValueError("Incremental repair cannot initialize because its initial path exceeds the configured resource reserve.")
+    session["planner"] = planner
+    return planner
+
 
 @app.get("/api/jezero/pois")
 def jezero_pois() -> dict[str, Any]:
@@ -95,14 +121,29 @@ def health() -> dict[str, str]:
 
 @app.get("/api/terrain")
 def terrain() -> dict[str, Any]:
-    """Legacy endpoint: return the default Jezero terrain."""
-    return TERRAINS["jezero"].to_dict()
+    raise HTTPException(status_code=409, detail="No default terrain is supplied. Request /api/terrain/{site_id} after importing that site's verified Mars DEM.")
 
 
 @app.get("/api/terrain/{site_id}")
 def terrain_for_mission_site(site_id: str) -> dict[str, Any]:
-    """Return the isolated terrain grid registered for one mission site."""
     return _terrain_for_site(site_id).to_dict()
+
+
+@app.get("/api/sites")
+def sites() -> dict[str, Any]:
+    return {
+        "sites": [
+            {
+                "id": site_id,
+                **site,
+                "terrain_loaded": site_id in TERRAINS,
+                "terrain_id": TERRAINS[site_id].terrain_id if site_id in TERRAINS else None,
+            }
+            for site_id, site in MISSION_SITES.items()
+        ],
+        "note": "Only the four configured sites are supported. A site is plannable only after its source DEM passes CRS, unit and footprint validation.",
+    }
+
 
 @app.get("/api/registry")
 def registry() -> dict[str, Any]:
@@ -111,7 +152,7 @@ def registry() -> dict[str, Any]:
         "common_coordinate_policy": {
             "recommended_analysis_coordinates": "Local metric working CRS derived from a verified Mars planetary CRS and a site-centred projection.",
             "mars_longitude_latitude": "Preserve planetocentric latitude and east-positive longitude for modern products unless the product label explicitly specifies another convention.",
-            "warning": "The synthetic demo tile has no latitude/longitude and cannot be overlaid on orbital imagery.",
+            "warning": "No default or synthetic terrain is generated. Import a verified Mars DEM for one of the four supported sites before planning.",
         },
     }
 
@@ -122,24 +163,20 @@ def routes(payload: PlanRequest) -> dict[str, Any]:
     goal = (payload.goal.x, payload.goal.y)
     try:
         constraints = MissionConstraints.from_dict(payload.constraints)
+        planner_started = perf_counter()
         route_set = build_route_set(active_terrain, start, goal, constraints)
+        planning_runtime_ms = round((perf_counter() - planner_started) * 1000.0, 2)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    # Retain an LPA* instance for the balanced policy. Later hazard updates
-    # repair this graph incrementally rather than rebuilding its search state.
-    try:
-        session_terrain = copy.deepcopy(active_terrain)
-        incremental = LPAStar(session_terrain, start, goal, constraints)
-        incremental_path = incremental.extract_path()
-        if not route_metrics(session_terrain, incremental_path, constraints)["return_feasible"]:
-            incremental_path = [(p["x"], p["y"]) for p in route_set[1]["path"]]
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"Incremental planner could not establish a route: {exc}") from exc
+    # The expensive incremental planner is deferred until the user requests
+    # obstacle/condition repair. Initial route generation performs only the
+    # requested route alternatives.
+    session_terrain = copy.deepcopy(active_terrain)
     plan_id = str(uuid.uuid4())
     PLAN_SESSIONS[plan_id] = {
         "terrain": session_terrain,
-        "planner": incremental,
+        "planner": None,
         "start": start,
         "goal": goal,
         "constraints": constraints,
@@ -150,19 +187,18 @@ def routes(payload: PlanRequest) -> dict[str, Any]:
         "site_id": payload.site_id,
         "created_utc": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
     }
-
     return {
         "plan_id": plan_id,
         "terrain_id": active_terrain.terrain_id,
         "site_id": payload.site_id,
+        "planning_runtime_ms": planning_runtime_ms,
         "start": {"x": start[0], "y": start[1]},
         "goal": {"x": goal[0], "y": goal[1]},
         "constraints": constraints.__dict__,
         "routes": route_set,
-        "incremental_balanced_path": [{"x": x, "y": y} for x, y in incremental_path],
-        "incremental_algorithm": "Lifelong Planning A* (LPA*) with retained g/rhs state",
-        "scientific_note": f"Routes use the {active_terrain.site_name} terrain grid. {active_terrain.warning}",
+        "scientific_note": f"Routes use the imported {active_terrain.site_name} DEM. {active_terrain.warning}",
     }
+
 
 @app.post("/api/replan")
 def replan(payload: ReplanRequest) -> dict[str, Any]:
@@ -178,8 +214,12 @@ def replan(payload: ReplanRequest) -> dict[str, Any]:
     if terrain.obstacle[y][x]:
         raise HTTPException(status_code=409, detail="That cell is already blocked")
 
+    try:
+        planner = _get_session_planner(session)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Incremental planner could not initialize: {exc}") from exc
+
     terrain.obstacle[y][x] = True
-    planner: LPAStar = session["planner"]
     try:
         before_expanded = planner.expanded
         planner.update_cells([(x, y)])
@@ -203,7 +243,7 @@ def replan(payload: ReplanRequest) -> dict[str, Any]:
         "expanded_during_repair": planner.expanded - before_expanded,
         "total_expanded_lifetime": planner.expanded,
         "obstacles_added": session["obstacles_added"],
-        "notice": "This is a simulated obstacle injection on synthetic terrain. It is not a real hazard report.",
+        "notice": "This is a user-triggered obstacle scenario on the imported DEM. It is not a measured Mars hazard observation.",
     }
 
 
@@ -224,19 +264,16 @@ def benchmark(payload: BenchmarkRequest) -> dict[str, Any]:
     return {
         "site_id": payload.site_id,
         "terrain_id": active_terrain.terrain_id,
-        "benchmark_scope": f"Same {active_terrain.site_name} synthetic grid, hard constraints, and resource reserve; scalar A*/Dijkstra use balanced weights.",
+        "benchmark_scope": f"Same {active_terrain.site_name} imported DEM-derived grid, hard constraints, and resource reserve; scalar A*/Dijkstra use balanced weights.",
         "results": results,
-        "warning": "Runtime and route comparisons are local synthetic-fixture measurements, not evidence of performance on NASA rasters or field conditions.",
+        "warning": "Runtime and route comparisons are measurements on the imported DEM grid, not evidence of performance on NASA rasters or field conditions.",
     }
 
 @app.post("/api/reset")
 def reset() -> dict[str, Any]:
-    global TERRAIN
-    for site_id in SITE_TERRAIN_PROFILES:
-        TERRAINS[site_id] = generate_site_terrain(site_id)
-    TERRAIN = TERRAINS["jezero"]
+    """Clear sessions without deleting or generating terrain data."""
     PLAN_SESSIONS.clear()
-    return {"status": "reset", "terrain_ids": {site_id: item.terrain_id for site_id, item in TERRAINS.items()}}
+    return {"status": "reset", "loaded_site_ids": sorted(TERRAINS)}
 
 
 # ---------------------------------------------------------------------------
@@ -427,46 +464,77 @@ async def import_dem(
     vertical_units: str = Form(default="unspecified"),
     site_id: str = Form(default="jezero"),
 ) -> dict[str, Any]:
-    if site_id not in SITE_TERRAIN_PROFILES:
+    if site_id not in SUPPORTED_SITE_IDS:
         raise HTTPException(status_code=404, detail=f"Unknown mission site '{site_id}'.")
-    suffix = Path(file.filename or "terrain.tif").suffix.lower()
-    if suffix not in {".tif", ".tiff"}:
-        raise HTTPException(status_code=422, detail="Upload a GeoTIFF (.tif or .tiff).")
-    raw = await file.read(250 * 1024 * 1024 + 1)
-    if not raw or len(raw) > 250 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="GeoTIFF must be non-empty and no larger than 250 MB.")
+    site = MISSION_SITES[site_id]
+    expected_name = site["dem"]["filename"]
+    uploaded_name = Path(file.filename or "").name
+    if uploaded_name.lower() != expected_name.lower():
+        raise HTTPException(status_code=422, detail=f"Use the catalogued {expected_name} DEM for {site['name']}. Do not attach a different site's raster.")
+    suffix = Path(uploaded_name).suffix.lower()
+    if suffix not in {".tif", ".tiff", ".img"}:
+        raise HTTPException(status_code=422, detail="Upload the selected site's real DEM in GeoTIFF or supported planetary PDS IMG format.")
+    max_upload_bytes = 400 * 1024 * 1024
+    raw = await file.read(max_upload_bytes + 1)
+    if not raw or len(raw) > max_upload_bytes:
+        raise HTTPException(status_code=413, detail="DEM must be non-empty and no larger than 400 MB. Use a documented site-centred clip for larger source products.")
     data_root = Path(__file__).resolve().parent / "data" / "ingested"
     data_root.mkdir(parents=True, exist_ok=True)
     destination = data_root / f"{uuid.uuid4().hex}{suffix}"
     destination.write_bytes(raw)
     try:
-        grid, provenance = dem_to_terrain(destination, width=max(32, min(width, 192)), height=max(32, min(height, 192)), vertical_units=vertical_units)
+        coverage = validate_site_coverage(
+            destination,
+            latitude=site["latitude"],
+            longitude_east=site["longitude_east"],
+        )
+        grid, provenance = dem_to_terrain(
+            destination,
+            width=max(32, min(width, 192)),
+            height=max(32, min(height, 192)),
+            vertical_units=vertical_units,
+        )
     except (ValueError, RuntimeError) as exc:
         destination.unlink(missing_ok=True)
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=f"Selected DEM could not be verified/imported: {exc}") from exc
     except Exception as exc:
         destination.unlink(missing_ok=True)
-        raise HTTPException(status_code=422, detail=f"Could not process the GeoTIFF: {exc}") from exc
-    provenance_path = destination.with_suffix(destination.suffix + ".provenance.json")
-    provenance_path.write_text(json.dumps(provenance, indent=2), encoding="utf-8")
-    site_name, _, latitude, longitude_east = SITE_TERRAIN_PROFILES[site_id]
+        raise HTTPException(status_code=422, detail=f"Could not process the selected planetary raster. If this is a PDS IMG, verify GDAL support for its embedded label/CRS: {exc}") from exc
+
     grid.site_id = site_id
-    grid.site_name = site_name
+    grid.site_name = site["name"]
     grid.terrain_id = f"mars-dem-{site_id}-{destination.stem}"
     grid.coordinate_info = {
         **(grid.coordinate_info or {}),
         "selected_site_id": site_id,
-        "selected_site_name": site_name,
-        "site_reference_latitude": latitude,
-        "site_reference_longitude_east": longitude_east,
-        "site_coverage_verified": False,
-        "site_coverage_note": "The DEM CRS and transform were inspected during import; confirm its footprint covers this landing site before scientific interpretation.",
+        "selected_site_name": site["name"],
+        "site_reference_latitude": site["latitude"],
+        "site_reference_longitude_east": site["longitude_east"],
+        "site_coverage_verified": True,
+        "site_coverage_check": coverage,
+        "official_dem_product": site["dem"]["product"],
+        "official_dem_source": site["dem"]["source"],
     }
+    provenance["selected_site_id"] = site_id
+    provenance["site_coverage_check"] = coverage
+    provenance["official_dem_product"] = site["dem"]["product"]
+    provenance_path = destination.with_suffix(destination.suffix + ".provenance.json")
+    provenance_path.write_text(json.dumps(provenance, indent=2), encoding="utf-8")
+
     TERRAINS[site_id] = grid
     for plan_id, session in list(PLAN_SESSIONS.items()):
         if session.get("site_id") == site_id:
             PLAN_SESSIONS.pop(plan_id, None)
-    return {"terrain": grid.to_dict(), "provenance": provenance, "stored_file": destination.name, "notice": f"Terrain for {site_name} replaced with the imported DEM-derived grid. Confirm its geographic footprint matches the selected site. Non-DEM environmental/science layers remain unavailable and are treated as unknown, not as zero risk."}
+    return {
+        "terrain": grid.to_dict(),
+        "provenance": provenance,
+        "stored_file": destination.name,
+        "notice": (
+            f"Verified {site['dem']['product']} for {site['name']}. "
+            "Elevation is sourced from the imported raster; slope and roughness are derived from it. "
+            "Other spatial science/hazard layers remain unavailable until separately imported."
+        ),
+    }
 
 
 @app.post("/api/terrain/import-layer")
@@ -481,8 +549,6 @@ async def import_terrain_layer(
 ) -> dict[str, Any]:
     """Align a user-selected official product band to the selected site's imported DEM."""
     active_terrain = _terrain_for_site(site_id)
-    if active_terrain.status == "SIMULATED_NOT_GEOREFERENCED":
-        raise HTTPException(status_code=409, detail=f"Import a verified DEM for {active_terrain.site_name} before adding aligned raster layers.")
     suffix = Path(file.filename or "layer.tif").suffix.lower()
     if suffix not in {".tif", ".tiff"}:
         raise HTTPException(status_code=422, detail="Upload a georeferenced GeoTIFF (.tif or .tiff).")
@@ -513,7 +579,7 @@ async def import_terrain_layer(
 def raster_inspect(filename: str = Query(min_length=1, max_length=200)) -> dict[str, Any]:
     root = (Path(__file__).resolve().parent / "data" / "ingested").resolve()
     target = (root / filename).resolve()
-    if root not in target.parents or not target.is_file() or target.suffix.lower() not in {".tif", ".tiff"}:
+    if root not in target.parents or not target.is_file() or target.suffix.lower() not in {".tif", ".tiff", ".img"}:
         raise HTTPException(status_code=404, detail="Ingested GeoTIFF not found.")
     try:
         return inspect_geotiff(target)
@@ -539,7 +605,7 @@ def offline_package(payload: dict[str, Any] = Body(default={})) -> FileResponse:
     root = Path(__file__).resolve().parent / "data"
     output_dir = root / "offline_packages"
     filename = f"marscope-offline-{uuid.uuid4().hex[:10]}.zip"
-    package_terrain = session["terrain"] if session else TERRAINS["jezero"]
+    package_terrain = session["terrain"] if session else _terrain_for_site(str(payload.get("site_id", "jezero")))
     output = create_package(output=output_dir / filename, terrain=package_terrain, plan=plan_data, data_root=root)
     return FileResponse(output, media_type="application/zip", filename=filename)
 
@@ -571,13 +637,18 @@ def replan_condition(payload: ConditionUpdateRequest) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=f"{payload.kind} must be between {low} and {high}.")
     if (x, y) in (session["start"], session["goal"]):
         raise HTTPException(status_code=422, detail="Cannot change the start or destination cell in a scenario update.")
+    try:
+        planner = _get_session_planner(session)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Incremental planner could not initialize: {exc}") from exc
     array = getattr(terrain, payload.kind)
+    if array is None:
+        raise HTTPException(status_code=409, detail=f"Spatial layer {payload.kind} is not loaded from source data.")
     old_value = array[y][x]
     old_available_layers = set(terrain.available_layers)
     array[y][x] = float(payload.value)
     layer_name = {"temperature_c": "temperature", "environment_index": "atmosphere", "radiation_index": "radiation", "slope_deg": "slope", "uncertainty": "uncertainty"}[payload.kind]
     terrain.available_layers.add(layer_name)
-    planner: LPAStar = session["planner"]
     before_expanded = planner.expanded
     try:
         planner.update_cells([(x, y)])
@@ -590,7 +661,7 @@ def replan_condition(payload: ConditionUpdateRequest) -> dict[str, Any]:
         terrain.available_layers = old_available_layers
         planner.update_cells([(x, y)])
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    update = {"cell": {"x": x, "y": y}, "kind": payload.kind, "previous_value": old_value, "new_value": payload.value, "source": "SIMULATED_SCENARIO_UPDATE"}
+    update = {"cell": {"x": x, "y": y}, "kind": payload.kind, "previous_value": old_value, "new_value": payload.value, "source": "USER_ENTERED_SCENARIO_UPDATE"}
     session["condition_updates"].append(update)
     session["routes"] = [
         ({**route, "path": [{"x": px, "y": py} for px, py in path], "metrics": metrics} if route["profile"] == "balanced" else route)
@@ -605,5 +676,5 @@ def replan_condition(payload: ConditionUpdateRequest) -> dict[str, Any]:
         "expanded_during_repair": planner.expanded - before_expanded,
         "total_expanded_lifetime": planner.expanded,
         "condition_updates": session["condition_updates"],
-        "notice": "This is a simulated local condition update, not a live Mars weather or hazard observation.",
+        "notice": "This is a user-entered what-if scenario over imported data; it is not a measured Mars environmental observation.",
     }
