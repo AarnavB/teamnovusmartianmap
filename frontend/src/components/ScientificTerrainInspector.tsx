@@ -77,7 +77,7 @@ export default function ScientificTerrainInspector({
       : blocked ? 'BLOCKED UNDER CURRENT FILTERS'
         : !hasMaskCell ? 'NOT ASSESSED · MASK MISSING' : 'TRAVERSABLE UNDER CURRENT FILTERS';
 
-  const cellSize = Number.isFinite(terrain.cell_size_m) && terrain.cell_size_m > 0 ? terrain.cell_size_m : null;
+  const cellSize = isFiniteNumber(terrain.cell_size_m) && terrain.cell_size_m > 0 ? terrain.cell_size_m : null;
   const targetMatches = (terrain.targets ?? [])
     .map((target) => ({
       target,
