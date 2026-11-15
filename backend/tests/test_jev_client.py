@@ -32,9 +32,11 @@ class FakeResponse:
 class FakeClient:
     instances: list = []
     responses: list = []
+    get_responses: list = []
 
     def __init__(self, *args, **kwargs):
         self.posts = []
+        self.gets = []
         FakeClient.instances.append(self)
 
     async def __aenter__(self):
@@ -52,11 +54,21 @@ class FakeClient:
             raise entry
         return entry
 
+    async def get(self, url, headers=None):
+        self.gets.append({"url": url, "headers": headers})
+        if not FakeClient.get_responses:
+            raise httpx.ConnectError("no scripted health response")
+        entry = FakeClient.get_responses.pop(0)
+        if isinstance(entry, Exception):
+            raise entry
+        return entry
+
 
 @pytest.fixture(autouse=True)
 def _reset_fake_client(monkeypatch):
     FakeClient.instances = []
     FakeClient.responses = []
+    FakeClient.get_responses = []
     monkeypatch.setattr(jev_client.httpx, "AsyncClient", FakeClient)
     monkeypatch.setattr(jev_client, "_RETRY_BACKOFF_SECONDS", 0)
     yield
@@ -129,6 +141,50 @@ def test_non_json_502_then_502_still_fails_503(monkeypatch):
     assert exc_info.value.status_code == 503
     assert "starting up or unreachable" in exc_info.value.detail
     assert "correlation_id=" in exc_info.value.detail
+
+
+def test_json_503_provider_failure_is_retried_once(monkeypatch):
+    _set_configured(monkeypatch)
+    FakeClient.responses = [
+        FakeResponse(503, {"detail": "Provider temporarily unavailable."}),
+        FakeResponse(200, {"weights": {"distance": 0.5}, "model": "m"}),
+    ]
+    result = _run(jev_client.request_jev_pathfinding_weights({"apiKey": "k"}))
+    assert result["weights"]["distance"] == 0.5
+    assert len(FakeClient.instances) == 2
+
+
+def test_json_429_rate_limit_is_not_retried(monkeypatch):
+    _set_configured(monkeypatch)
+    FakeClient.responses = [FakeResponse(429, {"detail": "Provider rate limit reached."})]
+    with pytest.raises(HTTPException) as exc_info:
+        _run(jev_client.request_jev_pathfinding_weights({"apiKey": "k"}))
+    assert exc_info.value.status_code == 429
+    assert "rate limit" in exc_info.value.detail
+    assert len(FakeClient.instances) == 1
+
+
+def test_health_probe_distinguishes_service_ready_from_http_reachable(monkeypatch):
+    _set_configured(monkeypatch)
+    FakeClient.get_responses = [FakeResponse(200, {
+        "status": "ok",
+        "service": "marscope-jev-decision-service",
+        "configured": False,
+    })]
+    result = _run(jev_client.probe_jev_reachability())
+    assert result["reachable"] is True
+    assert result["service_configured"] is False
+    assert result["service_ready"] is False
+    assert result["reason"] == "service_token_not_configured"
+
+
+def test_health_probe_rejects_unexpected_service_response(monkeypatch):
+    _set_configured(monkeypatch)
+    FakeClient.get_responses = [FakeResponse(200, {"status": "ok", "service": "other-service", "configured": True})]
+    result = _run(jev_client.probe_jev_reachability())
+    assert result["reachable"] is False
+    assert result["service_ready"] is False
+    assert result["reason"] == "unexpected_health_response"
 
 
 def test_json_401_is_not_retried(monkeypatch):
