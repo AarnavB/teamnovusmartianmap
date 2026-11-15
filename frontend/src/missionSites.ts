@@ -119,9 +119,9 @@ export const MISSION_SITES: readonly MissionSite[] = [
     feature: 'InSight landing region',
     focusLabel: 'Planetary interior + seismology',
     focus: 'Use the InSight landing ellipse as the topographic context for a stationary geophysical mission investigating Marsquakes and the planet’s interior.',
-    latitude: 4.5,
-    longitudeEast: 135.9,
-    coordinateNote: 'Published approximate landing-site centre',
+    latitude: 4.502,
+    longitudeEast: 135.623,
+    coordinateNote: 'Published InSight lander location; source DEM uses planetocentric latitude and positive-east longitude',
     coordinateSource: 'NASA Science · InSight landing site',
     coordinateSourceUrl: 'https://science.nasa.gov/resource/insights-landing-site-elysium-planitia/',
     dem: {

@@ -541,8 +541,8 @@ export default function App() {
   if (loading) return <div className="boot-screen"><div className="boot-mark">M</div><div className="boot-title">MARSCOPE</div><div className="boot-sub">INITIALIZING PLANETARY SYSTEMS</div><div className="boot-bar"><span /></div></div>;
 
   return (
-    <div className="app-shell">
-      <header className="topbar">
+    <div className="app-shell min-h-screen bg-[#0b0d10] text-stone-100 antialiased">
+      <header className="topbar sticky top-0 z-30 backdrop-blur-xl">
         <div className="brand-block">
           <div className="brand-mark">M</div>
           <div><div className="brand-name">MARSCOPE</div><div className="brand-tag">FROM ORBIT TO BOOTPRINT</div></div>
@@ -551,8 +551,8 @@ export default function App() {
         <div className="top-status"><span className={`status-dot ${status === 'OK' ? 'online' : 'offline'}`} /> API {status} <span className="top-divider" /> <span className="mono">BUILD 0.4.0</span></div>
       </header>
 
-      <main className="workspace">
-        <section className="left-rail">
+      <main className="workspace grid min-h-0 gap-3 p-3 xl:grid-cols-[260px_minmax(0,1fr)_320px]">
+        <section className="left-rail min-w-0">
           <div className="rail-head"><span className="eyebrow">MISSION AREA</span><span className="live-chip">{terrainLoading ? 'LOADING' : terrain ? 'REAL DEM' : 'NO REAL DEM'}</span></div>
           <div className="location-card mission-site-card">
             <div className="planet-glyph">♂</div>
@@ -661,7 +661,7 @@ export default function App() {
           <div className="rail-footnote"><span className="warning-icon">!</span><p>Research prototype only. Never use these paths as operational astronaut guidance.</p></div>
         </section>
 
-        <section className="center-column">
+        <section className="center-column min-w-0">
           <div className="view-header">
             <div><div className="eyebrow">SURFACE RECONNAISSANCE</div><h1>{selectedMissionSite.region} <span>/</span> {selectedMissionSite.feature}</h1></div>
             <div className="view-actions">
@@ -944,7 +944,7 @@ export default function App() {
           )}
         </section>
 
-        <aside className="right-rail">
+        <aside className="right-rail min-w-0">
           <div className="right-tabs"><button className={activeTab === 'planner' ? 'active' : ''} onClick={() => setActiveTab('planner')}>ANALYTICS</button><button className={activeTab === 'jev' ? 'active' : ''} onClick={() => setActiveTab('jev')}>JEV INTEL</button><button className={activeTab === 'data' ? 'active' : ''} onClick={() => setActiveTab('data')}>DATA</button></div>
           {activeTab === 'planner' && selected && <div className="analytics-content">
             <div className="analytics-head"><span className="eyebrow">SELECTED PROFILE</span><div className="selected-title"><span className={`route-letter route-${selected.id}`}>{selected.id}</span><h3>{selected.name}</h3></div></div>
@@ -1047,7 +1047,7 @@ export default function App() {
           )}
         </aside>
       </main>
-      <footer className="app-footer"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain ? 'IMPORTED MARS DEM · SOURCE HASHED' : 'NO REAL DEM LOADED'}</span><span>NOT FOR OPERATIONAL USE</span></footer>
+      <footer className="app-footer flex items-center justify-between"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain ? 'IMPORTED MARS DEM · SOURCE HASHED' : 'NO REAL DEM LOADED'}</span><span>NOT FOR OPERATIONAL USE</span></footer>
     </div>
   );
 }
