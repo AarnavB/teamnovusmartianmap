@@ -23,6 +23,15 @@ const layerNames: { id: Layer; name: string; unit: string }[] = [
   { id: 'science', name: 'Science potential', unit: '0–1 user-defined index' },
 ];
 
+function isVerifiedRealTerrain(terrain: TerrainData, siteId: string): boolean {
+  return terrain.site_id === siteId
+    && terrain.status === 'NASA_OR_USER_SUPPLIED_GEOREFERENCED_DEM'
+    && terrain.coordinate_info?.site_coverage_verified === true
+    && (terrain.available_layers ?? []).includes('elevation')
+    && terrain.width > 1
+    && terrain.height > 1;
+}
+
 function pointText(p: Point) { return `X ${String(p.x).padStart(2, '0')} / Y ${String(p.y).padStart(2, '0')}`; }
 function formatLatitude(value: number) { return `${Math.abs(value).toFixed(5)}° ${value < 0 ? 'S' : 'N'}`; }
 function formatLongitude(value: number) { return `${value.toFixed(5)}° E`; }
@@ -123,8 +132,8 @@ export default function App() {
     api.terrain(siteId)
       .then((terrainData) => {
         if (!alive) return;
-        if (terrainData.site_id !== siteId) {
-          throw new Error(`The API returned ${terrainData.site_name || terrainData.site_id || 'another site'} while ${siteId} was requested.`);
+        if (!isVerifiedRealTerrain(terrainData, siteId)) {
+          throw new Error('The backend did not return a real Mars DEM with a verified site footprint. Synthetic or unverified terrain is blocked.');
         }
         setTerrain(terrainData);
         setStatus('OK');
@@ -140,7 +149,7 @@ export default function App() {
 
   const runPlan = useCallback(async (newStart = start, newGoal = goal) => {
     const siteId = selectedMissionSiteId;
-    if (!terrain || terrain.site_id !== siteId || activeMissionSiteIdRef.current !== siteId) return;
+    if (!terrain || !isVerifiedRealTerrain(terrain, siteId) || activeMissionSiteIdRef.current !== siteId) return;
     setPlanning(true);
     setError('');
     setReplanResult(null);
@@ -480,7 +489,7 @@ export default function App() {
 
           {activeTab === 'science' && <ScienceAssistant missionSite={selectedMissionSite} />}
 
-          {activeTab === 'data' && <DataExplorer missionSite={selectedMissionSite} terrainLoaded={Boolean(terrain && terrain.site_id === selectedMissionSiteId)} sources={datasets} planId={plan?.plan_id} onTerrainImported={(nextTerrain) => { if (nextTerrain.site_id !== selectedMissionSiteId) { setError('The imported terrain belongs to a different mission site.'); return; } setTerrain(nextTerrain); setPlan(null); setRoutes([]); setBenchmarkResults([]); setError(''); setConditionNotice(''); setLayer('elevation'); const nextStart = { x: 4, y: 5 }; const nextGoal = { x: nextTerrain.width - 5, y: nextTerrain.height - 8 }; setStart(nextStart); setGoal(nextGoal); }} />}
+          {activeTab === 'data' && <DataExplorer missionSite={selectedMissionSite} terrainLoaded={Boolean(terrain && isVerifiedRealTerrain(terrain, selectedMissionSiteId))} sources={datasets} planId={plan?.plan_id} onTerrainImported={(nextTerrain) => { if (!isVerifiedRealTerrain(nextTerrain, selectedMissionSiteId)) { setError('Import rejected: the backend did not verify a real Mars DEM covering this selected site.'); return; } setTerrain(nextTerrain); setPlan(null); setRoutes([]); setBenchmarkResults([]); setError(''); setConditionNotice(''); setLayer('elevation'); const nextStart = { x: 4, y: 5 }; const nextGoal = { x: nextTerrain.width - 5, y: nextTerrain.height - 8 }; setStart(nextStart); setGoal(nextGoal); }} />}
         </aside>
       </main>
       <footer className="app-footer"><span>© MARSCOPE RESEARCH PROTOTYPE</span><span>DATA STATUS: {terrain ? 'IMPORTED MARS DEM · SOURCE HASHED' : 'NO REAL DEM LOADED'}</span><span>NOT FOR OPERATIONAL USE</span></footer>
