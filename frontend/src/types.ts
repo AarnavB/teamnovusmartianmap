@@ -142,6 +142,13 @@ export type Route = {
   };
   weights: Record<string, number>;
   is_pareto: boolean;
+  tradeoff_summary?: string;
+  diversity?: {
+    max_corridor_overlap_pct: number;
+    unique_corridor_pct: number;
+    label: string;
+    interpretation: string;
+  };
 };
 
 export type PlanResponse = {
@@ -167,6 +174,16 @@ export type ReplanResponse = {
   total_expanded_lifetime: number;
   obstacles_added: Point[];
   notice: string;
+};
+
+export type MissionEvent = {
+  id: string;
+  sequence: number;
+  timestamp_utc: string;
+  type: string;
+  title: string;
+  summary: string;
+  data: Record<string, unknown>;
 };
 
 export type DatasetRecord = {
