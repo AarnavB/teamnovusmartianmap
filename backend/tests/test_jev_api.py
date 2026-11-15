@@ -104,7 +104,7 @@ def test_evidence_assessment_endpoint_forwards_user_record_without_caching(monke
 
 def test_jev_status_endpoint_reports_config_and_last_success_without_secrets(monkeypatch):
     async def fake_probe():
-        return {"configured": True, "reachable": True, "status_code": 200}
+        return {"configured": True, "reachable": True, "service_configured": True, "service_ready": True, "status_code": 200}
 
     monkeypatch.setattr(main, "probe_jev_reachability", fake_probe)
     monkeypatch.setattr(
@@ -137,6 +137,7 @@ def test_jev_status_endpoint_reports_config_and_last_success_without_secrets(mon
     body = response.json()
     assert body["configured"] is True
     assert body["reachable"] is True
+    assert body["reachability"]["service_ready"] is True
     assert body["last_success"]["model"] == "test-model"
     assert body["last_success"]["correlation_id"] == "abc12345"
     assert response.headers["cache-control"].startswith("no-store")
