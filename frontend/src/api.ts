@@ -1,8 +1,17 @@
 import type { JezeroPoisResponse, ArchiveResult, BenchmarkResult, MissionConstraintsPayload, OfficialSource, OfflineStatus, PlanResponse, Point, ReplanResponse, RegistryResponse, ScienceAnswer, TerrainData } from './types';
 
-const API_BASE = (import.meta.env.VITE_API_BASE || 'https://marswalk-api-1o9c.onrender.com').replace(/\/$/, '');
+const API_BASE = (import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/, '');
+
+function requireApiBase(path: string): void {
+  if (!API_BASE) {
+    throw new Error(
+      `Backend URL is not configured. Set VITE_API_BASE to the HTTPS URL of the MARSCOPE backend deployed from this fork, then redeploy the frontend. Requested endpoint: ${path}`
+    );
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  requireApiBase(path);
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
@@ -58,6 +67,7 @@ export const api = {
     return request<{ terrain: TerrainData; provenance: Record<string, unknown>; notice: string }>('/api/terrain/import-layer', { method: 'POST', body: form });
   },
   offlinePackage: async (planId?: string, siteId = 'jezero') => {
+    requireApiBase('/api/offline/package');
     const response = await fetch(`${API_BASE}/api/offline/package`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan_id: planId, site_id: siteId }) });
     if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(typeof payload.detail === 'string' ? payload.detail : `Package export failed (${response.status})`); }
     return response.blob();
