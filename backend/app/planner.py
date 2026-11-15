@@ -52,13 +52,12 @@ class MissionConstraints:
     rest_interval_min: float = 60.0
     rest_duration_min: float = 5.0
     objective_weight_multipliers: dict[str, float] = field(default_factory=dict)
-    objective_weights: dict[str, float] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, values: dict[str, Any] | None) -> "MissionConstraints":
         if not values:
             return cls()
-        dictionary_fields = {"objective_weight_multipliers", "objective_weights"}
+        dictionary_fields = {"objective_weight_multipliers"}
         allowed = {k: v for k, v in values.items() if k in cls.__dataclass_fields__ and k not in dictionary_fields}
         numeric_keys = set(cls.__dataclass_fields__) - dictionary_fields
         for key in numeric_keys & set(allowed):
@@ -89,28 +88,6 @@ class MissionConstraints:
                     raise ValueError(f"Weight multiplier for {key} must be between 0 and 5.")
                 multipliers[key] = number
             result.objective_weight_multipliers = multipliers
-
-        raw_weights = values.get("objective_weights", {})
-        if raw_weights is not None:
-            if not isinstance(raw_weights, dict):
-                raise ValueError("objective_weights must be an object keyed by planner objective.")
-            unknown = set(raw_weights) - set(OBJECTIVES)
-            if unknown:
-                raise ValueError(f"Unknown planner weight objectives: {', '.join(sorted(unknown))}")
-            weights: dict[str, float] = {}
-            for key, raw_value in raw_weights.items():
-                if isinstance(raw_value, bool):
-                    raise ValueError(f"Objective weight for {key} must be a finite number.")
-                try:
-                    number = float(raw_value)
-                except (TypeError, ValueError) as exc:
-                    raise ValueError(f"Objective weight for {key} must be numeric.") from exc
-                if not math.isfinite(number) or not 0.0 <= number <= 1.0:
-                    raise ValueError(f"Objective weight for {key} must be between 0 and 1.")
-                weights[key] = number
-            if weights and sum(weights.values()) <= 0.0:
-                raise ValueError("At least one JEV objective weight must be greater than zero.")
-            result.objective_weights = weights
 
         result.max_slope_deg = max(1.0, min(45.0, float(result.max_slope_deg)))
         result.max_temperature_c = min(5.0, max(-100.0, float(result.max_temperature_c)))
@@ -165,16 +142,7 @@ class MultiObjectiveAStar:
         self.terrain = terrain
         self.constraints = constraints
         self.profile = profile
-        # JEV controls only Route B (the balanced profile). Routes A and C
-        # remain static comparison baselines. The exact vector is preserved in
-        # MissionConstraints so waypoint and LPA* repair use the same priorities.
-        if profile == "balanced" and constraints.objective_weights:
-            base_weights = {
-                key: constraints.objective_weights.get(key, 0.0)
-                for key in OBJECTIVES
-            }
-        else:
-            base_weights = PROFILES[profile]
+        base_weights = PROFILES[profile]
         multipliers = constraints.objective_weight_multipliers
         adjusted = {key: value * multipliers.get(key, 1.0) for key, value in base_weights.items()}
         # Unavailable layers are excluded completely. Do not replace missing
@@ -632,7 +600,7 @@ def build_route_set(terrain: Terrain, start: tuple[int, int], goal: tuple[int, i
         chosen_search["edge_cache_misses"] = chosen_model.edge_cache_misses
         chosen_search["max_labels_per_cell"] = chosen_model.max_labels_per_cell
         science_available = "science" in terrain.available_layers and terrain.science_potential is not None
-        display_title = ("JEV-ADAPTIVE" if profile == "balanced" and constraints.objective_weights else title) if science_available or profile != "science_first" else "SCIENCE-FIRST (NO SCIENCE LAYER)"
+        display_title = title if science_available or profile != "science_first" else "SCIENCE-FIRST (NO SCIENCE LAYER)"
         display_summary = summary if science_available or profile != "science_first" else "No georeferenced science-potential layer is loaded. This profile is a baseline alternative, not a science-target route."
         routes.append({
             "id": route_id,
@@ -643,8 +611,6 @@ def build_route_set(terrain: Terrain, start: tuple[int, int], goal: tuple[int, i
             "metrics": chosen_metrics,
             "search": {k: v for k, v in chosen_search.items() if k != "path"},
             "weights": chosen_model.weights,
-            "weight_source": "jev" if profile == "balanced" and constraints.objective_weights else "static_profile",
-            "weight_policy_version": "jev-weighted-a-star-1.0.0" if profile == "balanced" and constraints.objective_weights else None,
         })
 
     if not routes:
@@ -691,8 +657,6 @@ def build_route_set(terrain: Terrain, start: tuple[int, int], goal: tuple[int, i
             tradeoff = "Fastest modeled traverse; compare its terrain-risk and resource margin before selection."
         elif route is science_best:
             tradeoff = f"Highest available science-potential score; adds {distance_delta_pct:.0f}% distance versus the shortest alternative."
-        elif route["weight_source"] == "jev":
-            tradeoff = "JEV-adaptive compromise using the returned mission priorities; not a safety override."
         else:
             tradeoff = "Alternative objective balance; inspect the metrics and corridor overlap before selection."
         route["tradeoff_summary"] = tradeoff

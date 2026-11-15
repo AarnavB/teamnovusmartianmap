@@ -1214,13 +1214,13 @@ input[type="range"] {
   border-top: 1px solid rgba(207, 226, 237, .1);
 }
 
-/* Right-side workbench: Analytics, JEV Intel and Data share one navigation model. */
+/* Right-side workbench: analytics, inspection, science and data. */
 .right-tabs {
   position: sticky;
   top: 0;
   z-index: 6;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 4px;
   margin: 0 -16px;
   padding: 12px 13px;
@@ -1467,210 +1467,6 @@ input[type="range"] {
   color: #9eacba;
   font-size: 10px;
   line-height: 1.55;
-}
-
-/* JEV Intel card stack: a quieter scientific instrument, not a second dashboard. */
-.jev-content {
-  display: grid;
-  gap: 12px;
-  padding: 16px 0 2px;
-  color: #e6edf2;
-}
-
-.jev-intro-card,
-.jev-config-card,
-.jev-decision-card,
-.jev-safety-note {
-  border: 1px solid rgba(207, 223, 237, .14);
-  border-radius: 16px;
-  background:
-    linear-gradient(145deg, rgba(33, 43, 58, .78), rgba(15, 23, 35, .88));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .045);
-  padding: 14px;
-}
-
-.jev-kicker {
-  color: #9eb0c0;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: .13em;
-}
-
-.jev-title-row h2 {
-  margin: 0 0 7px;
-  color: #f3f6f8;
-  font-size: 17px;
-  letter-spacing: -.025em;
-}
-
-.jev-title-row p {
-  max-width: 560px;
-  margin: 0;
-  color: #aab8c5;
-  font-size: 10px;
-  line-height: 1.6;
-}
-
-.jev-status {
-  padding: 6px 9px;
-  border: 1px solid rgba(184, 204, 220, .2);
-  border-radius: 999px;
-  color: #c2ced8;
-  font-size: 8px;
-}
-
-.jev-status.is-active {
-  border-color: rgba(139, 210, 168, .32);
-  color: #b8e9cf;
-  background: rgba(63, 136, 89, .14);
-}
-
-.jev-context-grid > div,
-.jev-model-row > div {
-  border: 1px solid rgba(203, 221, 237, .1);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .035);
-}
-
-.jev-context-grid span,
-.jev-model-row span {
-  color: #94a6b7;
-  font-size: 9px;
-}
-
-.jev-context-grid b,
-.jev-model-row b {
-  color: #e9f0f5;
-  font-size: 10px;
-}
-
-.jev-layer-list,
-.jev-field > small {
-  color: #93a4b3;
-  font-size: 9px;
-  line-height: 1.5;
-}
-
-.jev-field > span {
-  color: #b9c5d0;
-  font-size: 9px;
-  font-weight: 750;
-  letter-spacing: .08em;
-}
-
-.jev-field > span small {
-  color: #899aaa;
-}
-
-.jev-field input,
-.jev-field select,
-.jev-field textarea {
-  border: 1px solid rgba(199, 219, 237, .17);
-  border-radius: 10px;
-  color: #f0f4f7;
-  background: rgba(7, 13, 22, .7);
-  font-size: 11px;
-}
-
-.jev-field input:focus,
-.jev-field select:focus,
-.jev-field textarea:focus {
-  border-color: rgba(138, 217, 223, .52);
-  outline: 2px solid rgba(138, 217, 223, .12);
-}
-
-.jev-actions button {
-  min-height: 38px;
-  border-radius: 10px;
-  font-size: 9px;
-  font-weight: 750;
-}
-
-.jev-actions .primary-button {
-  border-color: rgba(226, 239, 246, .7);
-  color: #14202a;
-  background: linear-gradient(135deg, #d6edf0, #8ed0d6);
-  box-shadow: 0 7px 18px rgba(72, 151, 166, .15);
-}
-
-.jev-actions .ghost-button {
-  border-color: rgba(205, 223, 238, .17);
-  color: #c2ced9;
-  background: rgba(255, 255, 255, .04);
-}
-
-.jev-message {
-  border-color: rgba(138, 217, 223, .2);
-  border-radius: 10px;
-  color: #c6e8e8;
-  background: rgba(61, 129, 138, .13);
-  font-size: 10px;
-}
-
-.jev-message.is-error {
-  border-color: rgba(231, 137, 122, .25);
-  color: #ffc0b5;
-  background: rgba(131, 58, 49, .17);
-}
-
-.jev-blend,
-.jev-empty-state {
-  border: 1px solid rgba(202, 220, 236, .12);
-  border-radius: 11px;
-  background: rgba(255, 255, 255, .035);
-}
-
-.jev-blend-head {
-  color: #a8b7c4;
-  font-size: 9px;
-}
-
-.jev-blend-head b,
-.jev-weight-row b {
-  color: #e7eef4;
-  font-size: 11px;
-}
-
-.jev-blend-track,
-.jev-weight-track {
-  background: rgba(181, 205, 224, .13);
-}
-
-.jev-blend-track span,
-.jev-weight-track span {
-  background: linear-gradient(90deg, #83cbd1, #d6bb9f);
-}
-
-.jev-weight-row small {
-  color: #9aaaba;
-  font-size: 9px;
-}
-
-.jev-weight-value {
-  color: #f1c5a9;
-  font-size: 10px;
-}
-
-.jev-empty-state {
-  padding: 14px;
-}
-
-.jev-empty-state b {
-  color: #e5edf3;
-  font-size: 11px;
-}
-
-.jev-empty-state p,
-.jev-caveat,
-.jev-safety-note p {
-  color: #9eacba;
-  font-size: 9px;
-  line-height: 1.55;
-}
-
-.jev-safety-note b {
-  color: #bdcbd6;
-  font-size: 9px;
 }
 
 /* Data Explorer hierarchy: clear source families, accessible controls and status. */
@@ -2420,10 +2216,6 @@ button:disabled {
 
   .metric-hero strong {
     font-size: 22px;
-  }
-
-  .jev-model-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .provenance-detail-grid {

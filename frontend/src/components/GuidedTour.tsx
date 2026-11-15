@@ -11,9 +11,8 @@ const steps = [
   { section: "DATA SYSTEMS / 02", title: "Discover the data", copy: "The Data Catalogue combines source discovery, provenance, terrain ingestion and offline-package review. Inspect source metadata before importing a dataset.", note: "Only a site-matched, georeferenced DEM that passes the application validation guard is accepted as route-ready terrain." },
   { section: "TERRAIN LAB / 03", title: "Read the surface", copy: "Switch between 2D and 3D terrain views, inspect available map layers and review the mapped coverage before interpreting the surface.", note: "Unavailable layers remain unavailable. A teaching grid or cached image is not relabelled as a verified elevation model." },
   { section: "MISSION PLANNER / 04", title: "Define a traverse", copy: "Choose a mission site, set the start and destination, add intermediate waypoints and adjust the planning constraints. Generate and compare candidate route profiles.", note: "Generated paths are research outputs, not astronaut-safe or operationally validated routes." },
-  { section: "DECISION CENTER / 05", title: "Inspect JEV decisions", copy: "Open JEV Intel to review the decision-support workflow and any validated preference vector applied to the planner.", note: "JEV preference weights do not replace hard constraints or the underlying route-validation logic." },
-  { section: "SCIENCE TARGETS / 06", title: "Connect science objectives", copy: "Review targets associated with the loaded terrain, select objectives and use supported target coordinates to influence waypoint planning.", note: "A target without defensible spatial metadata is not assigned an invented map location." },
-  { section: "EVA VISOR / 07", title: "Step through a simulated EVA", copy: "The Astronaut HUD presents route position, heading, nearby mapped constraints, science targets and planner-derived resource estimates. Start, pause, resume, advance or reset the route-cell simulation.", note: "This is a browser simulation. It is not connected to astronaut hardware, live localization, suit telemetry or certified navigation sensors." },
+  { section: "SCIENCE TARGETS / 05", title: "Connect science objectives", copy: "Review targets associated with the loaded terrain, select objectives and use supported target coordinates to influence waypoint planning.", note: "A target without defensible spatial metadata is not assigned an invented map location." },
+  { section: "EVA VISOR / 06", title: "Step through a simulated EVA", copy: "The Astronaut HUD presents route position, heading, nearby mapped constraints, science targets and planner-derived resource estimates. Start, pause, resume, advance or reset the route-cell simulation.", note: "This is a browser simulation. It is not connected to astronaut hardware, live localization, suit telemetry or certified navigation sensors." },
 ];
 
 export default function GuidedTour({ step, onChange, onClose }: Props) {
@@ -53,7 +52,7 @@ export default function GuidedTour({ step, onChange, onClose }: Props) {
         <div className="guided-tour-progress" aria-label={`Step ${step + 1} of ${steps.length}`}>
           {steps.map((item, index) => <span key={item.section} className={index <= step ? "complete" : ""} />)}
         </div>
-        <div className="guided-tour-section">{current.section}<span>STEP {String(step + 1).padStart(2, "0")} / 07</span></div>
+        <div className="guided-tour-section">{current.section}<span>STEP {String(step + 1).padStart(2, "0")} / 06</span></div>
         <h2 id="tour-title" ref={titleRef} tabIndex={-1}>{current.title}</h2>
         <p id="tour-description">{current.copy}</p>
         <div className="guided-tour-note"><span>FIELD NOTE</span>{current.note}</div>

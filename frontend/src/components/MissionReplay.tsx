@@ -94,12 +94,10 @@ export default function MissionReplay({
   const replayTravelledM = pathDistance(visibleProgress, cellSizeM);
   const replayRemainingM = pathDistance(replayPath.slice(Math.min(frame, replayPath.length)), cellSizeM);
   const replayProgress = replayPath.length > 1 ? Math.round((Math.min(frame, replayPath.length - 1) / (replayPath.length - 1)) * 100) : 0;
-  const jevDecisionCount = events.filter((event) => event.type.includes('JEV')).length;
   const planCount = events.filter((event) => event.type === 'PLAN_CREATED').length;
   const routeChangeCount = events.filter((event) => event.type === 'REPLAN_COMPLETED').length;
   const routePoints = (path: Point[]) => path.map((point) => `${point.x},${terrainHeight - point.y}`).join(' ');
   const replanCount = events.filter((event) => event.type === 'REPLAN_COMPLETED').length;
-  const hasJev = events.some((event) => event.type === 'JEV_DECISION');
   const status = replanCount > 0 ? 'REPLANNED' : 'PLANNED';
   const currentDate = currentEvent ? new Date(currentEvent.timestamp_utc).toLocaleString() : 'No events';
 
@@ -131,7 +129,7 @@ export default function MissionReplay({
       <div className="mission-summary-stat"><span>MISSION STATE</span><strong>{status}</strong><small>{events.length} recorded events</small></div>
       <div className="mission-summary-stat"><span>SELECTED ROUTE</span><strong>{selectedRouteId}</strong><small>{selectedRoute?.name ?? 'No route selected'}</small></div>
       <div className="mission-summary-stat"><span>FINAL DISTANCE</span><strong>{formatMetric(selectedRoute?.metrics.distance_m, 'm')}</strong><small>Current selected-route estimate</small></div>
-      <div className="mission-summary-stat"><span>DECISION / REPLAN LOG</span><strong>{hasJev ? 'JEV + ' : ''}{replanCount} REPLANS</strong><small>{hasJev ? 'Adaptive decision captured' : 'Static route priorities'}</small></div>
+      <div className="mission-summary-stat"><span>DECISION / REPLAN LOG</span><strong>{replanCount} REPLANS</strong><small>Recorded route adjustments</small></div>
     </div>
     <div className="replay-progress-overview">
       <div className="replay-progress-heading"><div><span className="eyebrow">ROUTE RECONSTRUCTION</span><strong>Playback progress</strong></div><b>{replayProgress}%</b></div>
@@ -140,7 +138,7 @@ export default function MissionReplay({
         <div><span>PLAYED DISTANCE</span><strong>{replayTravelledM.toFixed(0)} m</strong></div>
         <div><span>REMAINING IN REPLAY</span><strong>{replayRemainingM.toFixed(0)} m</strong></div>
         <div><span>RECONSTRUCTED PATH</span><strong>{replayDistanceM.toFixed(0)} m</strong></div>
-        <div><span>EVENT TRACE</span><strong>{planCount} plans · {jevDecisionCount} JEV · {routeChangeCount} replans</strong></div>
+        <div><span>EVENT TRACE</span><strong>{planCount} plans · {routeChangeCount} replans</strong></div>
       </div>
     </div>
     <div className="mission-debrief-metrics">
