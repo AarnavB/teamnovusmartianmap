@@ -189,3 +189,11 @@ def test_temperature_layer_blocks_cells_without_valid_coverage(tmp_path):
 
     assert terrain.obstacle[4][4] is True
     assert terrain.obstacle[25][25] is False
+
+def test_elysium_catalogue_uses_published_insight_lander_coordinate():
+    from app.mission_sites import MISSION_SITES
+
+    elysium = MISSION_SITES["elysium"]
+    assert elysium["latitude"] == pytest.approx(4.502)
+    assert elysium["longitude_east"] == pytest.approx(135.623)
+
