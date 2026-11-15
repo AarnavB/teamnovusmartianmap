@@ -48,6 +48,7 @@ export type TerrainData = {
   uncertainty: number[][] | null;
   science_potential: number[][] | null;
   obstacle: boolean[][];
+  valid_mask?: boolean[][] | null;
   targets: Target[];
   cell_units: string;
   layer_provenance: string;
