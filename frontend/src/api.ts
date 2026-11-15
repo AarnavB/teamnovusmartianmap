@@ -57,8 +57,8 @@ export const api = {
     const form = new FormData(); form.append('file', file); form.append('layer', layer); form.append('value_min', String(min)); form.append('value_max', String(max)); form.append('source_unit', unit); form.append('band', String(band)); form.append('site_id', siteId);
     return request<{ terrain: TerrainData; provenance: Record<string, unknown>; notice: string }>('/api/terrain/import-layer', { method: 'POST', body: form });
   },
-  offlinePackage: async (planId?: string) => {
-    const response = await fetch(`${API_BASE}/api/offline/package`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan_id: planId }) });
+  offlinePackage: async (planId?: string, siteId = 'jezero') => {
+    const response = await fetch(`${API_BASE}/api/offline/package`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan_id: planId, site_id: siteId }) });
     if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(typeof payload.detail === 'string' ? payload.detail : `Package export failed (${response.status})`); }
     return response.blob();
   },
