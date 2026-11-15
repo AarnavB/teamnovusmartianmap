@@ -1,7 +1,7 @@
-"""Deterministic synthetic terrain used for algorithm/UI validation.
+"""Terrain data structures and explicitly isolated synthetic test fixtures.
 
-This module intentionally does NOT assign the generated grid real Mars
-coordinates or present its values as NASA observations.
+The production API does not generate terrain: it serves only imported,
+georeferenced Mars DEMs. generate_terrain remains available solely for tests.
 """
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ class Terrain:
     science_potential: list[list[float]] | None
     obstacle: list[list[bool]]
     targets: list[dict[str, Any]]
+    valid_mask: list[list[bool]] | None = None
     seed: int = 20261114
     available_layers: set[str] = field(default_factory=lambda: {"elevation", "slope", "roughness", "regolith", "temperature", "atmosphere", "radiation", "uncertainty", "science"})
     terrain_id: str = "mars-demo-synthetic-01"
@@ -74,6 +75,7 @@ class Terrain:
             "uncertainty": self.uncertainty if "uncertainty" in self.available_layers else None,
             "science_potential": self.science_potential if "science" in self.available_layers else None,
             "obstacle": self.obstacle,
+            "valid_mask": self.valid_mask,
             "targets": self.targets,
             "cell_units": self.cell_units,
             "layer_provenance": self.layer_provenance,
