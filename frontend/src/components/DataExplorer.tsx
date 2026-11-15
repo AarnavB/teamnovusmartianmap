@@ -189,16 +189,16 @@ export default function DataExplorer({ sources, planId, onTerrainImported, missi
 
   return <div className="data-content archive-explorer">
     <section className="archive-search-card mission-dem-card">
-      <div className="archive-section-head"><b>ACTIVE SITE · REAL TERRAIN SOURCE</b><span className={terrainLoaded ? "connected-tag" : "manual-tag"}>{terrainLoaded ? "REAL DEM LOADED" : "IMPORT REQUIRED"}</span></div>
+      <div className="archive-section-head"><b>ACTIVE SITE · AUTOMATIC REAL TERRAIN</b><span className="connected-tag">{terrainLoaded ? "REAL DEM READY" : "AUTO-LOAD ON SITE SELECT"}</span></div>
       <h3>{missionSite.region}</h3>
       <p><b>{missionSite.dem.product}</b></p>
       <p>{missionSite.dem.source} · {missionSite.dem.resolutionM.toFixed(missionSite.dem.resolutionM < 2 ? 2 : 1)} m/post · {missionSite.dem.format}</p>
       <p>{missionSite.dem.coverageNote}</p>
       <div className="archive-search-line">
-        <a href={missionSite.dem.downloadUrl} target="_blank" rel="noreferrer">DOWNLOAD OFFICIAL DEM ↗</a>
+        <a href={missionSite.dem.downloadUrl} target="_blank" rel="noreferrer">OFFICIAL SOURCE FILE ↗</a>
         <a href={missionSite.dem.documentationUrl} target="_blank" rel="noreferrer">PRODUCT DOCUMENTATION ↗</a>
       </div>
-      <small>Download the catalogued product, then import that file below. This site remains unavailable to route planning until its raster passes Mars CRS, metre-unit and site-footprint checks. No synthetic terrain is used as a fallback.</small>
+      <small>When this site is selected, the backend automatically retrieves this catalogued product if it is not already cached, validates its Mars CRS, metre units and site footprint, then prepares the route grid. Judges do not need to download or upload the DEM. No synthetic terrain is used as a fallback.</small>
     </section>
     <div className="panel-title"><span className="eyebrow">OFFICIAL ARCHIVE CONNECTORS</span><h3>NASA data access</h3><p>Discover official products, inspect their original metadata, import geospatial rasters with provenance, and preserve selected mission materials for offline review.</p></div>
 
@@ -251,14 +251,14 @@ export default function DataExplorer({ sources, planId, onTerrainImported, missi
     </section>
 
     <section className="archive-search-card">
-      <div className="archive-section-head"><b>06 / IMPORT A VERIFIED MARS DEM</b><span className="manual-tag">GEOSPATIAL INGESTION</span></div>
-      <p>Upload the exact catalogued DEM product for this site. The backend verifies its Mars reference ellipsoid, projected metre units and coverage of the selected site's reference coordinate. It derives slope and local roughness from measured elevations only; unavailable science and hazard rasters remain unavailable.</p>
+      <div className="archive-section-head"><b>06 / MANUAL DEM IMPORT (OPTIONAL FALLBACK)</b><span className="manual-tag">ADMIN / RECOVERY</span></div>
+      <p>Automatic source retrieval is the normal path. Use manual import only as an administrative fallback when the official source endpoint is unavailable or a verified local copy is being supplied. The backend applies the same Mars CRS, metre-unit and site-footprint checks. Slope and roughness are derived from measured elevations only; unavailable science and hazard rasters remain unavailable.</p>
       <label className="compact-field-label">DEM VERTICAL UNITS (VERIFY IN ORIGINAL PRODUCT LABEL)
         <select className="mapping-input" value={demVerticalUnits} onChange={(e) => setDemVerticalUnits(e.target.value)} aria-label="DEM vertical units">
           <option value="unspecified">Not verified yet</option><option value="m">Metres (verified in source label)</option>
         </select>
       </label>
-      <label className="upload-button">{loading === 'dem' ? 'PROCESSING DEM…' : 'SELECT CATALOGUED SITE DEM'}<input type="file" accept={missionSite.dem.accept} hidden onChange={(e) => void importDem(e.target.files?.[0])} disabled={loading !== null}/></label>
+      <label className="upload-button">{loading === 'dem' ? 'PROCESSING DEM…' : 'SELECT VERIFIED DEM FALLBACK'}<input type="file" accept={missionSite.dem.accept} hidden onChange={(e) => void importDem(e.target.files?.[0])} disabled={loading !== null}/></label>
       <small>Do not upload a browse PNG/JPEG/CTX image; the selected source must be an elevation model. Confirm metres from the source product label. Meridiani uses a PDS3 IMG file; ingestion requires the embedded planetary label/CRS to be readable by GDAL/Rasterio. If it is rejected, convert it with a planetary-aware tool while preserving its PDS metadata.</small>
     </section>
 
