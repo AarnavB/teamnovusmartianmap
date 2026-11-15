@@ -56,19 +56,38 @@ def inspect_geotiff(path: Path) -> dict[str, Any]:
         }
 
 
-def validate_site_coverage(path: Path, *, latitude: float, longitude_east: float) -> dict[str, Any]:
-    """Require the uploaded raster footprint to contain the selected site's reference point."""
+def validate_site_coverage(
+    path: Path,
+    *,
+    latitude: float,
+    longitude_east: float,
+    window_size_m: float = 2400.0,
+) -> dict[str, Any]:
+    """Verify that a site's local DEM window contains real elevation cells.
+
+    Mars catalog coordinates are commonly planetocentric, while some projected
+    CRS definitions expose a planetographic/geodetic base CRS. Rather than
+    assuming one convention, test both coordinate interpretations against the
+    raster's actual valid-data mask. The chosen point must be inside the raster
+    footprint *and* have valid elevation coverage in the same local window used
+    by the route-grid builder.
+    """
     try:
         import rasterio
         from pyproj import Transformer
+        from rasterio.windows import Window, from_bounds
     except ImportError as exc:
         raise RuntimeError("Install rasterio and pyproj before importing georeferenced Mars terrain.") from exc
+
+    if not math.isfinite(window_size_m) or not 500.0 <= window_size_m <= 20000.0:
+        raise ValueError("Local route-grid window_size_m must be between 500 and 20,000 metres.")
 
     with rasterio.open(path) as src:
         if src.crs is None or not src.crs.is_projected:
             raise ValueError("The DEM must contain a projected planetary CRS. A filename or browse image is not georeferencing.")
         if str(src.crs.linear_units).lower() not in {"metre", "meter", "meters", "metres"}:
             raise ValueError("The DEM's projected CRS must use metres.")
+
         from pyproj import CRS as PyprojCRS
         projected_crs = PyprojCRS.from_wkt(src.crs.to_wkt())
         geographic = projected_crs.geodetic_crs
@@ -81,36 +100,95 @@ def validate_site_coverage(path: Path, *, latitude: float, longitude_east: float
         if not _is_mars_ellipsoid(semi_major, semi_minor):
             raise ValueError("The raster CRS ellipsoid does not match the Mars reference ellipsoid; site coverage cannot be verified.")
 
-        # Mission-site catalog coordinates are planetocentric. The geographic
-        # base CRS used by PROJ expects planetographic (geodetic) latitude.
-        # Convert explicitly rather than silently treating the two as equal.
         latitude_rad = math.radians(float(latitude))
         latitude_planetographic = math.degrees(math.atan2(
             semi_major * semi_major * math.sin(latitude_rad),
             semi_minor * semi_minor * math.cos(latitude_rad),
         ))
         transformer = Transformer.from_crs(geographic, projected_crs, always_xy=True)
-        candidates = [longitude_east]
+        longitudes = [float(longitude_east)]
         # Planetary products use both 0–360 east-positive and -180–180
         # longitude domains. Test the equivalent coordinate in both domains.
-        candidates.append(longitude_east - 360.0 if longitude_east > 180.0 else longitude_east + 360.0)
-        for longitude in candidates:
-            x, y = transformer.transform(longitude, latitude_planetographic)
-            if src.bounds.left <= x <= src.bounds.right and src.bounds.bottom <= y <= src.bounds.top:
-                return {
-                    "reference_latitude_planetocentric": latitude,
-                    "reference_latitude_planetographic_for_transform": latitude_planetographic,
-                    "reference_longitude_east": longitude_east,
-                    "reference_longitude_transformed": longitude,
-                    "projected_reference_xy_m": [float(x), float(y)],
-                    "raster_bounds_m": [float(src.bounds.left), float(src.bounds.bottom), float(src.bounds.right), float(src.bounds.top)],
-                    "coverage_verified": True,
-                }
-        raise ValueError(
-            "The uploaded DEM footprint does not contain this mission site's reference coordinate. "
-            "Choose a product covering the selected site; do not attach another site's raster."
-        )
+        longitudes.append(float(longitude_east) - 360.0 if longitude_east > 180.0 else float(longitude_east) + 360.0)
 
+        half = window_size_m / 2.0
+        raster_window = Window(0, 0, src.width, src.height)
+        candidates: list[dict[str, Any]] = []
+        in_bounds_candidates = 0
+
+        latitude_candidates = [
+            ("planetocentric", float(latitude)),
+            ("planetographic", latitude_planetographic),
+        ]
+        for latitude_convention, candidate_latitude in latitude_candidates:
+            for longitude in longitudes:
+                x, y = transformer.transform(longitude, candidate_latitude)
+                if not (math.isfinite(x) and math.isfinite(y)):
+                    continue
+                if not (src.bounds.left <= x <= src.bounds.right and src.bounds.bottom <= y <= src.bounds.top):
+                    continue
+                in_bounds_candidates += 1
+
+                requested_bounds = (x - half, y - half, x + half, y + half)
+                requested_window = from_bounds(*requested_bounds, transform=src.transform)
+                try:
+                    local_window = requested_window.intersection(raster_window).round_offsets().round_lengths()
+                except Exception:
+                    continue
+                if local_window.width < 2 or local_window.height < 2:
+                    continue
+
+                # Match the validity check used by dem_to_terrain: a raster
+                # may have a rectangular bounding box but a smaller, irregular
+                # valid-data footprint with NoData around its edges.
+                sample = src.read(1, window=local_window, masked=True).astype("float64")
+                sample_values = sample.filled(np.nan)
+                valid = ~np.ma.getmaskarray(sample) & np.isfinite(sample_values)
+                valid_fraction = float(valid.sum() / valid.size) if valid.size else 0.0
+                if valid_fraction > 0.0:
+                    candidates.append({
+                        "latitude_convention": latitude_convention,
+                        "latitude_used": candidate_latitude,
+                        "longitude_used": longitude,
+                        "x": float(x),
+                        "y": float(y),
+                        "valid_fraction": valid_fraction,
+                    })
+
+        if not candidates:
+            if in_bounds_candidates:
+                raise ValueError(
+                    f"The selected site's {window_size_m:.0f} m local DEM window contains no valid elevation cells "
+                    "for either planetocentric or planetographic latitude interpretation."
+                )
+            raise ValueError(
+                "The uploaded DEM footprint does not contain this mission site's reference coordinate. "
+                "Choose a product covering the selected site; do not attach another site's raster."
+            )
+
+        # Prefer the interpretation that exposes the most measured terrain.
+        # On ties, prefer planetocentric coordinates, which are used by the
+        # USGS InSight product metadata and the mission-site catalogue.
+        selected = max(
+            candidates,
+            key=lambda item: (
+                item["valid_fraction"],
+                item["latitude_convention"] == "planetocentric",
+            ),
+        )
+        return {
+            "reference_latitude_planetocentric": float(latitude),
+            "reference_latitude_planetographic_for_transform": float(latitude_planetographic),
+            "reference_latitude_used_for_transform": selected["latitude_used"],
+            "reference_latitude_convention": selected["latitude_convention"],
+            "reference_longitude_east": float(longitude_east),
+            "reference_longitude_transformed": selected["longitude_used"],
+            "projected_reference_xy_m": [selected["x"], selected["y"]],
+            "raster_bounds_m": [float(src.bounds.left), float(src.bounds.bottom), float(src.bounds.right), float(src.bounds.top)],
+            "local_window_size_m": float(window_size_m),
+            "local_window_valid_fraction": round(selected["valid_fraction"], 6),
+            "coverage_verified": True,
+        }
 
 def _local_std(array: np.ndarray) -> np.ndarray:
     padded = np.pad(array, 1, mode="edge")

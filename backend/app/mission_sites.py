@@ -62,9 +62,9 @@ MISSION_SITES = {
     "elysium": {
         "name": "Elysium Planitia",
         "mission": "InSight",
-        "latitude": 4.5,
-        "longitude_east": 135.9,
-        "coordinate_note": "Published approximate InSight landing-site centre",
+        "latitude": 4.502,
+        "longitude_east": 135.623,
+        "coordinate_note": "Published InSight lander location; source DEM uses planetocentric latitude and positive-east longitude",
         "dem": {
             "product": "CTX Digital Terrain Model of Mars InSight Landing Site Ellipse 9 Center",
             "source": "USGS Astrogeology Science Center",
