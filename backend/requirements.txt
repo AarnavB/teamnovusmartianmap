@@ -7,3 +7,4 @@ python-multipart>=0.0.20
 rasterio>=1.4,<2.0
 pyproj>=3.7,<4.0
 # Optional: pytest for local development.
+boto3>=1.35,<2.0
