@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from .benchmarks import scalar_baseline, benchmark_label_caps
 from .lpa import LPAStar
 from .models import BenchmarkRequest, ConditionUpdateRequest, PlanRequest, ReplanRequest, SensitivityRequest, WaypointPlanRequest
-from .planner import MissionConstraints, build_route_set, route_metrics
+from .planner import MissionConstraints, MultiObjectiveAStar, build_route_set, route_metrics
 from .registry import get_registry
 from .terrain import Terrain
 from .mission_sites import MISSION_SITES, SUPPORTED_SITE_IDS
