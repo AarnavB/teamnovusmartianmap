@@ -4,6 +4,8 @@ import App from './App';
 import './tailwind.css';
 import './styles.css';
 import './modern-ui.css';
+import './liquid-glass.css';
+import './mission-intelligence.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
