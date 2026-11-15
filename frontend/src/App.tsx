@@ -73,6 +73,7 @@ export default function App() {
   const [pickMode, setPickMode] = useState<'start' | 'goal' | 'waypoint' | null>(null);
   const [evaMode, setEvaMode] = useState(false);
   const [activeTab, setActiveTab] = useState<'planner' | 'jev' | 'data'>('planner');
+  const [dataMenuOpen, setDataMenuOpen] = useState(false);
   const [maxSlope, setMaxSlope] = useState(22);
   const [evaMinutes, setEvaMinutes] = useState(180);
   const [energyBudgetWh, setEnergyBudgetWh] = useState(180);
@@ -945,7 +946,7 @@ export default function App() {
         </section>
 
         <aside className="right-rail min-w-0">
-          <div className="right-tabs"><button className={activeTab === 'planner' ? 'active' : ''} onClick={() => setActiveTab('planner')}>ANALYTICS</button><button className={activeTab === 'jev' ? 'active' : ''} onClick={() => setActiveTab('jev')}>JEV INTEL</button><button className={activeTab === 'data' ? 'active' : ''} onClick={() => setActiveTab('data')}>DATA</button></div>
+          <div className="right-tabs"><button className={activeTab === 'planner' ? 'active' : ''} onClick={() => setActiveTab('planner')}>ANALYTICS</button><button className={activeTab === 'jev' ? 'active' : ''} onClick={() => setActiveTab('jev')}>JEV INTEL</button><button className={`data-launch ${dataMenuOpen ? 'active' : ''}`} onClick={() => setDataMenuOpen(true)} aria-haspopup="dialog" aria-expanded={dataMenuOpen}>DATA <span className="data-launch-glyph">↗</span></button></div>
           {activeTab === 'planner' && selected && <div className="analytics-content">
             <div className="analytics-head"><span className="eyebrow">SELECTED PROFILE</span><div className="selected-title"><span className={`route-letter route-${selected.id}`}>{selected.id}</span><h3>{selected.name}</h3></div></div>
             <div className="metric-hero"><div><span>TOTAL DISTANCE</span><strong>{selected.metrics.distance_m.toFixed(0)}<small>m</small></strong></div><div><span>TRAVEL TIME</span><strong>{selected.metrics.duration_min.toFixed(1)}<small>min</small></strong></div></div>
@@ -1017,33 +1018,45 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'data' && (
-            <DataExplorer
-              missionSite={selectedMissionSite}
-              terrainLoaded={Boolean(terrain && isVerifiedRealTerrain(terrain, selectedMissionSiteId))}
-              terrain={terrain}
-              sources={datasets}
-              planId={plan?.plan_id}
-              onTerrainImported={(nextTerrain) => {
-                if (!isVerifiedRealTerrain(nextTerrain, selectedMissionSiteId)) {
-                  setError('Import rejected: the backend did not verify a real Mars DEM covering this selected site.');
-                  return;
-                }
-                setTerrain(nextTerrain);
-                setActiveJevDecision(null);
-                setPlan(null);
-                setRoutes([]);
-                setWaypoints([]);
-                setBenchmarkResults([]);
-                setError('');
-                setConditionNotice('');
-                setLayer('elevation');
-                const nextStart = INITIAL_START;
-                const nextGoal = INITIAL_GOAL;
-                setStart(nextStart);
-                setGoal(nextGoal);
-              }}
-            />
+          {dataMenuOpen && (
+            <div className="data-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDataMenuOpen(false); }}>
+              <section className="data-modal-panel" role="dialog" aria-modal="true" aria-labelledby="data-modal-title">
+                <header className="data-modal-header">
+                  <div><span className="eyebrow">MISSION DATA SYSTEMS / 03</span><h2 id="data-modal-title">Data catalogue</h2><p>Source discovery, terrain ingestion, provenance and offline map packages.</p></div>
+                  <button className="data-modal-close" onClick={() => setDataMenuOpen(false)} aria-label="Close data catalogue">×</button>
+                </header>
+                <div className="data-modal-meta"><span><i /> LIVE DATA INTERFACE</span><span>{datasets.length} CATALOGUED SOURCES</span><span>{terrain ? 'TERRAIN LOADED' : 'AWAITING TERRAIN'}</span></div>
+                <div className="data-modal-body">
+            {dataMenuOpen && (
+              <DataExplorer
+                missionSite={selectedMissionSite}
+                terrainLoaded={Boolean(terrain && isVerifiedRealTerrain(terrain, selectedMissionSiteId))}
+                terrain={terrain}
+                sources={datasets}
+                planId={plan?.plan_id}
+                onTerrainImported={(nextTerrain) => {
+                  if (!isVerifiedRealTerrain(nextTerrain, selectedMissionSiteId)) {
+                    setError('Import rejected: the backend did not verify a real Mars DEM covering this selected site.');
+                    return;
+                  }
+                  setTerrain(nextTerrain);
+                  setActiveJevDecision(null);
+                  setPlan(null);
+                  setRoutes([]);
+                  setWaypoints([]);
+                  setBenchmarkResults([]);
+                  setError('');
+                  setConditionNotice('');
+                  setLayer('elevation');
+                  const nextStart = INITIAL_START;
+                  const nextGoal = INITIAL_GOAL;
+                  setStart(nextStart);
+                  setGoal(nextGoal);
+                }}
+              />
+                </div>
+              </section>
+            </div>
           )}
         </aside>
       </main>
